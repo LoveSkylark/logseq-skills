@@ -83,8 +83,10 @@ wedge the worker while the MCP process stays healthy. Queries are
 single-attempt for that reason: a query that timed out once will time out
 again, and retrying doubles the load on something already struggling.
 
-**`searchBlocks` is the one tool that puts a predicate in front of every
-title in the graph**, so it is the most likely to provoke this. Scope it with
+`searchBlocks` and approved `datascriptQuery` predicates can inspect every
+title in the graph. Scope queries when possible; output caps do not cap worker
+execution, and every query retry or revision needs fresh explicit approval.
+For tools supporting page scoping, scope it with
 `page_uuid` when you can, and if the graph stops responding after a search,
 the worker is the first thing to suspect — restart Logseq, not just the MCP.
 Do not loop it over a list of words without checking the graph is still
