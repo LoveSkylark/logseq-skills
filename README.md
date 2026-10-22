@@ -12,7 +12,7 @@ Install a skill using the skill mechanism supported by your agent client. Keep L
 
 ## Target
 
-These skills target the MCP server built into Logseq Desktop. They assume native tools such as `createEmbed` and `listEmbeds` are available; they are not written for the separate Python `mcp-logseq-db` server.
+These skills target the MCP server built into Logseq Desktop for DB graphs. Native Logseq source, SDK, tests and advertised tool schemas are authoritative. They assume native tools such as `createEmbed` and `listEmbeds` are available.
 
 ## Build
 
