@@ -20,6 +20,10 @@ Treat each page as the root of an outline. Represent document heading hierarchy 
 
 A heading marker alone does not create the parent-child relationship. Preserve heading markers (for example `#`, `##`, `###`) and also express the same nesting through outline depth.
 
+This describes the source outline for heading-aware import. Single-block
+`createBlock`/`updateBlock` calls do not promise the same heading conversion;
+inspect native heading metadata rather than treating literal markers as proof.
+
 Example shape:
 
 ```text

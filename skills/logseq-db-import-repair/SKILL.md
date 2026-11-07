@@ -14,7 +14,12 @@ The goal is always to keep the page's structure, wording, ordering and block UUI
 - Use `updateBlock` to fix only the offending block's text in place, preserving its UUID, its position, and any properties (like `:logseq.property/heading`) that should survive.
 - Use `removeBlock` only for blocks that are confirmed to be invisible junk (empty content, no legitimate purpose) — never for a block that has visible text, even if it's also part of the bug.
 - Use `moveBlock` / `moveBlocks` to relocate content during diagnosis, never as the repair itself unless the goal is genuinely to reorganize.
-- After any fix, verify with `pageStats` and `findOrphans` on the affected page(s) rather than re-reading the whole tree.
+- After any fix, re-read the affected UUIDs and relevant parent/heading/link state. `pageStats` and `findOrphans` are supplementary counts, not proof of content preservation or renderer recovery; confirm the UI symptom separately.
+
+The native E2E checklist records no live passes. The historical crash examples
+below are hypotheses to check against the current graph, not proof that a
+current build reproduces them. Keep source contracts, automated fixtures and
+actual UI checks distinct.
 
 ## Review legacy tags versus backlinks
 
@@ -58,7 +63,12 @@ Example: a block with content `# [[6a93617c-78e8-48fc-be23-5b64c897e648]]` (a le
 
 This crashed regardless of whether the link was self-referential (pointing at the page the block itself lives on) or pointed at an unrelated page (including a page that is itself an alias target). Self-reference is not required to trigger it — a plain heading-only link to any other page reproduced the crash too.
 
-**Fix:** `updateBlock` the block's title to plain text — either the link target's display title, or any short descriptive text — keeping the heading markdown level (`#`, `##`, etc.) if the block should stay a heading. This clears the `refs` edge on that block entirely (verify via `getBlock` — the `refs` field should be absent after the fix) while preserving the heading's position and level.
+**Proposed fix after confirmation:** record the block's UUID, parent, order
+and native heading property; then use `updateBlock` with plain descriptive
+text. Do not prepend Markdown heading markers to preserve the level:
+single-block update is not import's heading-conversion route. Re-read the
+same UUID and verify text, parent, heading level and removal of the intended
+reference. If any differs, stop rather than assuming preservation.
 
 ```
 Before: {"content": "#### [[6a936179-74b2-43b5-a252-31e06f24880b]]", ":logseq.property/heading": 4, "refs": [{"id": 504}]}
@@ -73,9 +83,13 @@ These are blocks with `content: ""` (nothing visible in the UI) that nonetheless
 
 These are believed to be leftover artifacts from Logseq OG's `((block-reference))` / block-embed syntax: the display text was cleared out at some point during migration, but the underlying `:block/link` datascript edge was left behind, pointing at a block that may no longer exist in a form the DB renderer expects.
 
-They are usually found as the sole child of an otherwise ordinary content block (e.g. a glossary entry `"Campaign"` with one empty child carrying this stray link). They render as nothing in the UI, so removing them loses no visible information.
+They were found as sole children of ordinary content blocks. That historical
+shape is not a safe deletion rule: empty titles can be real embeds, and
+children or references may carry meaningful information.
 
-**Fix:** `removeBlock` on the empty block directly. Since it has no content, this cannot lose any visible information. Do not remove or alter its parent (the visible block it's attached to) — only the empty stub child itself.
+**Fix only after confirmation:** inspect the exact block, target, descendants
+and references; obtain approval to remove a genuinely purposeless stub.
+Pass the stub's UUID to `removeBlock`, never its visible parent or linked target.
 
 **Guard against deleting a real embed.** The native Logseq MCP exposes
 `listEmbeds` and returns embed target metadata from `getBlock`. Check the
@@ -83,8 +97,8 @@ suspect UUID in the owning page's embed listing first.
 If it is a listed embed, it is a linked view, not an empty stub: preserve it
 unless the user explicitly wants that embed removed. `removeBlock` must receive
 the embed's UUID; its target remains intact. `listEmbeds` identifies embeds,
-but is not a general query for every raw `:block/link` value; use the property
-scan below for suspected dangling link attributes. An empty title alone does
+but is not a missing-target audit; use the structured inventory below for
+suspected linked stubs. An empty title alone does
 not prove the block is junk.
 
 ## Diagnostic method: bisection via non-destructive moves
@@ -103,10 +117,27 @@ There is no way to get a JS stack trace or crash log through the native MCP tool
 
 ## Proactively scanning a page for Pattern 2 before it causes a crash
 
-`:block/link` is a raw internal Datascript attribute, not a Logseq "property" in the user-facing sense — it does **not** appear in `listProperties`, and `getProperyUsers` refuses it ("not a title or a UUID" — it wants a full namespaced ident like `:user.property/foo-xxxx`, and `link` isn't namespaced). `listEmbeds` can identify native embeds, but is not a general query for every raw `:block/link` value. To inspect the attribute on suspected stubs, use:
+`getProperyUsers` takes an exact namespaced property ident, not a UUID, title
+or raw `"link"` attribute. Use `findEntities` for a bounded structured
+inventory instead. Replace the example page UUID with the resolved page:
 
-1. Call `inspectPage(page_uuid, detail="properties")` on the page (this can be a large payload for a big page — expect it to be saved to a file rather than returned inline; read it with the file-reading tool and grep/parse with a short script rather than paging through it by hand).
-2. Filter the returned `properties` array for entries where `property.ident == "link"`.
-3. For each match, check whether `holder.content == ""` — if so, it's very likely a Pattern 2 dangling stub and a `removeBlock` candidate. (A non-empty holder with a `link` property may be legitimate content that also happens to carry this attribute — don't remove those without checking `getBlock` on it directly first.)
+```json
+{
+  "kind": "block",
+  "page_uuid": "00000000-0000-4000-8000-000000000001",
+  "where": {
+    "all": [
+      {"field": "title", "op": "empty"},
+      {"field": "has_link", "op": "eq", "value": true}
+    ]
+  },
+  "select": ["uuid", "title", "parent_uuid"],
+  "limit": 50
+}
+```
 
-This workaround is verbose and payload-heavy for large pages. A general lookup for arbitrary raw `:block/link` values is not available in the native MCP tools.
+Check `truncated` and continue with `next_cursor` unchanged; graph writes
+invalidate paging. `has_link` describes embed/link structure, not ordinary
+textual backlinks or proof of a dangling target. Inspect each UUID with
+`getBlock`, compare `listEmbeds`, and check descendants/references before
+proposing a repair. This inventory grants no deletion permission.

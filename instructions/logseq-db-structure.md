@@ -13,6 +13,10 @@ Treat the page as the root of a tree. Heading level and block parentage must agr
 - Do not invent headings to fill skipped levels. Attach a skipped-level heading to the nearest preceding broader heading and preserve its source heading level when known.
 - Heading markers and outline nesting are separate: keep `#`/`##`/`###` so Logseq renders the native heading, and indent/nest the block under its owning header.
 
+This is the source shape for heading-aware import, not a guarantee that
+single-block `createBlock`/`updateBlock` converts Markdown markers. Verify
+native heading metadata separately from text and parentage.
+
 Example:
 
 ```text

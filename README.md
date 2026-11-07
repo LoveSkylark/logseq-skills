@@ -20,6 +20,19 @@ recycled-title archiving. These are source-reviewed contracts, not a claim that
 the connected desktop app has been rebuilt or live-tested. Check advertised
 schemas and `capabilities` on that app before relying on them.
 
+The latest documentation review also clarifies unpaginated `listPages`,
+counted-journal limits, literal block updates versus heading-aware imports,
+MCP reference-value shapes, and the known case-variant page-creation defect.
+The native E2E checklist records no live passes; written procedures and local
+fixture tests must not be reported as actual graph/UI verification.
+
+Source documentation in the sibling checkout:
+
+- [Native MCP tool contracts](../logseq/docs/mcp-native-tool-map.md)
+- [Native regression checklist and remaining verification gaps](../logseq/docs/mcp-native-e2e-test.md)
+- [Native MCP implementation notes](../logseq/docs/mcp-native-migration.md)
+- [Desktop HTTP DB API reference](../logseq/docs/native-db-api.md) (a different interface, not an MCP schema)
+
 ## Build
 
 From PowerShell, run:

@@ -46,6 +46,12 @@ Inspect `archived_pages` after real calls, especially on failure: archiving
 and creation are not atomic. A missing `getPageUUID` result alone proves neither
 availability nor successful archiving.
 
+Case-variant titles have a known collision-reporting defect: preflight can
+say available and creation can return an existing page as verified. Check
+the page inventory for case variants first. After creation independently
+check the exact requested title and whether the UUID already belonged to a
+holder; `verified: true` alone does not establish a new identity.
+
 Routed through `logseq.DB.createPage`, not `upsertNodes`. Two reasons:
 `upsertNodes` fails outright on synced graphs, returning "The Imported EDN has
 N validation error(s)" for a write its own dry run accepts; and `createPage`
@@ -130,11 +136,13 @@ form worked. The same route underlies `deleteTag`.
 clearPage(page_uuid)
 ```
 
-Deletes every block, keeps the page. One call per top-level block since there
+Deletes content blocks while preserving property-value subtrees and page
+metadata. It refuses nested pages and page inventories over 1000 blocks.
+One call per deletable top-level block since there
 is no batch delete, each taking its subtree with it — so cost scales with the
 number of top-level blocks, not total blocks.
 
-The page entity, its tags and its property values are untouched. Use this
+The page entity, its tags and its property-value subtrees are preserved. Use this
 rather than `deletePage` followed by `createPage`: the latter changes the UUID
 and breaks every reference.
 
@@ -168,8 +176,7 @@ moveBlocks(block_uuids[], target_uuid, placement="last-child",
 ```
 
 **Use `moveBlocks` for more than one block.** It is the bulk write for a flat
-run of siblings — the journal-to-page shape — and costs two API calls per
-block rather than the eight a single `moveBlock` needs. The first block is
+run of siblings. The first block is
 placed by `placement`; each later one is placed after the one before it, which
 is what preserves the order you gave. `last-child` appends the run after
 whatever the target already held.
@@ -211,7 +218,8 @@ what to move after, because nothing in this API can write `:block/order`. In
 exchange it verifies the block ended up *last*, so a `verified: true` from
 `last-child` is a stronger claim than one from `child`.
 
-The API returns nothing, so three things are verified by reading back: the new
+Subtree collection and move checks have 1000-block/descendant guards;
+oversized inventories are refused. Three things are verified by reading back: the new
 parent, the owning page, and that descendants followed. Each is a distinct
 failure. A block whose parent did not change is a silent no-op. A block whose
 owning page did not follow is a real child of the target that no page-scoped
@@ -265,8 +273,8 @@ createPageofBlocks(page_uuid, outline)
 
 Indented text in, tree out. Costs one call per parent that has children.
 
-Creation returns the entities it made, so a parent's UUID is known before its
-own children are inserted — there is no read-back cycle. Duplicate titles among
+Creation identifies the entities it made and verifies the inserted inventory,
+so a parent's UUID is known before its children are inserted. Duplicate titles among
 siblings are fine for the same reason: nothing has to identify a new block by
 its title.
 
@@ -323,10 +331,15 @@ only when the baseline page inventory was empty. Failed verification can
 mean partially committed content, not an empty page.
 
 Existing content is NOT appended to — `insertBatchBlock` **prepends**,
-confirmed 2026-09-20. New blocks land ABOVE what the page already held, and a
+so verify actual sibling order after insertion. New blocks land ABOVE what the page already held, and a
 second import lands above the first, so importing a document chapter by
 chapter into one page yields the chapters in reverse order, silently, with
 `blocks` counting correctly every time. Order within a single call is correct.
+Nested fenced Markdown can lose fences/indentation or omit later blocks.
+On failed verification inspect created UUIDs and the actual outline before
+retrying. Prefer native Code-tagged blocks for code; the Code tag sets display
+type, not language, which remains a UI configuration step.
+
 Import a page in one call where you can; if you must build it up, read
 `:block/order` afterwards rather than assuming, or relocate with `moveBlocks`
 and `last-child`.
@@ -376,14 +389,17 @@ createProperty("Effort", {"type": "number"})
 A **plain title**, never a namespaced ident — Logseq treats the first argument
 as a page name and rejects the `/`.
 
-Types: `default` (text), `number`, `string`, `datetime`, `checkbox`, `url`,
-`node`, `page`, `class`, `property`, `map`.
+The wrapper forwards `schema` and `options` to native property upsert and
+verifies the requested `schema.type` against the stored type. Native schema
+fields include `type`, `cardinality`, `hide`, and `public`; documented types
+include `default`, `number`, `date`, `datetime`, `checkbox`, `url`, `node`,
+`asset`, `json`, and `string`. That list is not proof every schema has passed
+MCP verification or a real-graph test. Start with simple `default`, `number`,
+or `checkbox`, cardinality `one`, when establishing a new workflow.
 
-The namespace comes from caller identity and cannot be chosen. An explicit
-ident in the schema is accepted and silently discarded. **Retain the ident
-returned in `verified_state`** — for plugin properties it is predictable
-(`:plugin.property.<caller>/<Title>`, no suffix), but read it rather than
-constructing it.
+**Retain the canonical returned ident.** Logseq can normalize the title;
+neither caller spelling nor an explicit ident in input establishes the
+stored ident.
 
 ### Setting a value
 
@@ -393,10 +409,13 @@ addProperty(target_uuid, ":plugin.property._test_plugin/Effort", 5)
 
 Target may be a page or a block.
 
-**Reference types take an entity, not a literal.** `node`, `page`, `class`, and
-`property` values are entity ids. So are closed enums: call `listClosedValues`
-and pass one of the listed entities. `Status` renders as "Doing" but is stored
-as a reference.
+**MCP reference values use graph-local integer IDs.** For property types
+`node`, `page`, `class`, or `property`, pass an integer ID or an object with
+integer `id`/`db/id`; UUID strings, booleans, and `{uuid: ...}` fail this guard.
+Read the entity immediately and never persist its ID as identity.
+Closed-value definitions are a separate concept: inspect `listClosedValues`
+and the property's actual schema. Do not pass the UUID-array shape of native
+HTTP `addPropertyValueChoices` to MCP `addProperty`.
 
 Cardinality matters. `many` adds to a set; `one` replaces.
 
@@ -411,9 +430,8 @@ Writes reach only `plugin.property.<caller>/*`. Everything else is read-only:
 | `:logseq.property/*` | built-in | no |
 
 The server rejects out-of-namespace idents **before** the call, so the failure
-is a clear error rather than a silent no-op. This is Logseq's restriction, not
-the server's — there is no workaround, and the user should be told plainly
-rather than watching attempts fail.
+is a clear error rather than a silent no-op. Tell the user the MCP limitation
+plainly; direct HTTP documentation does not authorize bypassing it.
 
 ### Deleting a definition
 

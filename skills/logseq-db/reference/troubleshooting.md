@@ -14,18 +14,18 @@ lookup fails. Results are tool-specific, not a universal failure envelope.
 | `archived_pages` in an unverified creation/import | Some recycled holders may already have been renamed before a later step failed. | Inspect those exact UUIDs and the requested title before retrying. |
 | `createEmbed` verification failed or timed out | The embed may already have been created even though verification did not complete. | Inspect `listEmbeds` using the owning page and target UUIDs before retrying. |
 | An embed has an empty title | Linked target content is not copied into the embed block's title. | Use `getBlock` or `listEmbeds` to inspect target metadata. Do not treat a confirmed embed as an empty placeholder or remove its target. |
-| `"outside this caller's namespace"` | A `user.property/*` or built-in property write. | Not possible over HTTP. Do not look for a workaround. |
+| `"outside this caller's namespace"` | A property ident outside the native MCP caller's namespace. | Use only permitted MCP property tools; direct HTTP documentation is not permission to bypass them. |
 | `deletePage` refuses with a reference count | Entities link to the page and those links are not rewritten. | Report the count to the user; only set `acknowledge_reference_rewrite` once they have decided. |
 | A page "deleted" but still readable by UUID | Expected. Deleting recycles: the entity survives with `:logseq.property/deleted-at`. | Check `listPages` excludes it. Use `listRecycled` to see it. |
 | A dry run succeeded but the real call failed | `dry_run` validates the PAYLOAD; the real call also validates the TRANSACTION. A graph carrying invalid entities passes the first and fails the second. | Never report a dry run as a completed change. |
 | `pageStats` shows `own_blocks` well below `subtree_blocks`, or `true_orphans` above zero | Some blocks' `:block/page` points at an ancestor block. **Not damage** — Logseq renders from `:block/parent`, so they display normally. | Nothing. Do not move blocks to correct it; a move rewrites their order for no benefit. |
 | A user says content is missing from a page | Check the page in the Logseq UI before believing any count. | A count disagreement is not evidence of missing content. Confirm the symptom first. |
 | A tool call returns "no result received after 4 minutes" | The client stopped waiting; the server usually kept working and committed. | Do not retry blindly. Re-read state to see what landed. Bulk operations need a batch limit so each call returns in time. |
-| A large query returns `[]` when a `(count …)` of the same clauses returns thousands | Almost always a MALFORMED query, not size. An inline `#uuid "…"` or a quoted string inside the query text breaks the JSON body, and the failure looks like an empty result. | Pass strings and UUIDs as `:in` parameters instead of inlining them. Confirm the query runs at all with a `(count …)` form first. |
+| Query results disagree with expectations | Syntax, inputs, scope, projection or truncation may differ; this alone does not establish corruption or a transport failure. | Inspect the actual envelope/errors. Parameterize strings/UUIDs. Any diagnostic `datascriptQuery` needs its own explicit approval. |
 | `searchBlocks` returns `blocks: []` | No literal title match among the bounded native candidates, not an exhaustive graph zero. | Check spelling/case or use `findEntities` for structured/exact matching. |
 | `findEntities` returns `truncated: true` | Row or byte bounds stopped the result. | Pass `next_cursor` with unchanged parameters; row `count` is not a total. |
 | `findEntities` rejects a stale cursor or reports graph changes | Paging no longer refers to the same graph/search snapshot. | Restart without a cursor. Do not combine incompatible partial results. |
-| Every write fails with "The Imported EDN has N validation error(s)" while the dry run succeeds | `upsertNodes` fails on SYNCED graphs. Nothing in this server routes through it any more; if you see this, something is calling it directly. | Not a graph fault and not repairable from here. `createPage`, `insertBlock`, `updateBlock` and `createTag` all work on the same graph. |
+| A real transaction returns an EDN validation error after a successful dry run | Payload validation did not establish transaction success. The message alone does not identify a graph defect. | Read the error and affected state; do not bypass MCP or report a graph-wide limitation from one failed route. |
 | A write works in the Logseq UI but fails through a tool | The method that tool routes through is failing, not the graph. | Try a tool that uses a different route before concluding anything about the data. |
 
 ## Before blaming the graph
@@ -46,9 +46,9 @@ would have settled in seconds what several hours of inference did not.
 right every time. "Can you do this in Logseq itself?" invalidates most
 corruption theories immediately.
 
-**Check whether the query ran.** `null` from a `(count …)` means the request
-never reached Logseq — a count returns a number or nothing at all. `[]` from a
-query with inline quotes usually means the same. Neither is data.
+**Check the actual query result.** Inspect errors, inputs, `row_count` and
+`truncated`; an empty or null result alone does not prove the request never
+reached Logseq. A diagnostic query needs fresh approval, not silent retries.
 
 **Do not trust a metric built on the attribute you suspect.** If
 `own_blocks` is computed from `:block/page`, it cannot be evidence about
@@ -61,8 +61,7 @@ connection dropped. Retrying could duplicate it. Native MCP does not advertise
 the legacy standalone server's `writes_disabled` circuit; do not assume
 later writes are automatically blocked.
 
-That asymmetry is the point — reads are how you find out what actually
-happened.
+Reads are how you find out what actually happened.
 
 To recover:
 
@@ -90,8 +89,8 @@ the worker is the first thing to suspect — restart Logseq, not just the MCP.
 Do not loop it over a list of words without checking the graph is still
 answering in between.
 
-If a trivial read also times out afterwards, the worker is wedged. Restart
-Logseq.
+If a trivial read also times out, stop mutations and investigate responsiveness.
+A timeout alone does not establish that the DB worker is wedged.
 
 A long UI freeze during a write usually means the same thing. Wait for the read
 to succeed before assuming the write failed.
@@ -106,19 +105,19 @@ likelihood:
 **Wrong identifier type.** A property given a UUID instead of an ident. A tag
 given its ident instead of its UUID. A block UUID where a page UUID belongs.
 
-**A name where a UUID belongs.** No field resolves titles. `page-id` in
-particular looks like it might and does not.
+**A name where a UUID belongs.** Use the advertised MCP shape: entity targets
+use UUIDs, property tools require exact namespaced idents, and reference values
+may require a freshly read integer ID. `importPage.target` can be a title
+for creation; that is not a general title-resolution rule for mutation fields.
 
-**An unsupported combination.** `upsertNodes` accepts exactly `add`+`page`,
-`add`+`block`, `edit`+`block`. `edit`+`page` returns an explicit error;
-anything else may not.
+**Assuming an API schema is an MCP schema.** Direct HTTP commands, option
+maps and value-choice arrays are not MCP arguments. Check the connected tool.
 
-**A discarded field.** `data` is a closed allowlist — `page-id` and `title`
-only. An explicit `ident` passed to `createProperty` is accepted and thrown
-away.
+**A normalized property definition.** Retain the canonical ident returned
+by `createProperty`, not one constructed from its input title.
 
-To confirm which, read the target with `getPage(..., detail="all")` or
-`getBlock`, and compare against what you asked for.
+Read the target with `inspectPage(..., detail="all")` or `getBlock`, and
+compare exact identity and state with what was requested.
 
 ## Escaping errors
 
@@ -149,6 +148,24 @@ does not mean the method is broken. Do not enable `probe_writes` on a real
 graph merely to discover capabilities: obtain explicit approval and use a
 disposable graph. Native schemas and fresh read-back evidence are authoritative,
 not standalone-server scripts or environment-variable instructions.
+
+## Verification is specific evidence
+
+The current native E2E checklist records no live passes. It prescribes tests
+on explicitly approved, fresh run-owned fixtures, not a completed run.
+Separate source review, automated fixtures, and real graph/UI results.
+
+- `verified` checks a tool's stated postconditions, not every field, renderer
+  behavior, or the absence of all unrelated damage.
+- Case-variant `createPage` can return an existing page as verified.
+  Compare exact title and UUID with preexisting holders before reporting
+  a new page.
+- Counts do not prove heading/content/order preservation. Read affected
+  UUIDs and confirm UI symptoms separately.
+- Child-tag reparenting, advanced property schemas, and asset cases need
+  their own fixtures; an unused-tag or simple-property test does not cover them.
+- Never run write probes or destructive demonstrations on a user's real
+  graph merely to fill a testing gap.
 
 ## A count is not a symptom
 

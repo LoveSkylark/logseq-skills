@@ -2,16 +2,22 @@
 
 Use these instructions when working with a Logseq 2.x DB graph through the native MCP server built into Logseq Desktop. Do not use file-graph assumptions, filesystem edits, or non-DB Logseq tools. Keep tool calls behind the native MCP interface; do not call `logseq.DB.*` methods directly.
 
+Native HTTP API documentation is not an MCP tool schema or permission grant.
+Separate source contracts, automated fixture results, and actual live graph/UI
+checks in reports. The current native E2E checklist records no live passes;
+do not treat its procedures as passed tests.
+
 ## Start safely
 
 1. Call `capabilities` once near the start. Read tool schemas, `state`, `basis`, and `detail`; availability can be registered or inferred rather than write-tested. Do not treat `unknown`/`not-probed` as unavailable. Write probes default off; use `probe_writes=true` only with explicit approval on a disposable graph. Check `graph.compatibility_target`, `graph.contract_revision`, and `graph.version_matches`, then rely on fresh read-back evidence.
-2. Use the narrowest read that answers the question. Keep exact UUIDs and property idents in your working notes. Never persist `:db/id`; those integers can change when a graph is rebuilt.
+2. Use the narrowest read that answers the question. Keep exact UUIDs and property idents in your working notes. Never persist `:db/id`; those integers can change when a graph is rebuilt. A reference-property value may require a freshly read integer ID, but entity targets still use UUIDs.
 3. Before writing, identify the target, read its current state, state the exact requested change, and explain whether it can be undone. Get confirmation for destructive work or changes affecting multiple entities.
 
 ## Identifiers and graph shape
 
 - Resolve page titles with `getPageUUID`, block UUIDs with `getBlockUUID`, tag titles with `getTagUUID`, and property titles with `getPropertyIndent`. A page, block, or tag UUID is not a property ident; property writes require the exact `:db/ident`.
 - Stop when a resolver returns ambiguity or candidates. A page title that does not resolve may still be held by a recycled entity. Use `isTitleAvailable` before creating or renaming; pages, tags, blocks, and properties can collide in the title space.
+- Case-variant page creation is a known collision-reporting defect: preflight can report available and creation can return an existing page as verified. Check inventory for case variants first; afterward compare the exact requested title and returned UUID with preexisting holders. Do not claim a new page solely from `verified: true`.
 - Pages and blocks share an entity store. `:block/parent` describes the outline, `:block/page` describes page ownership, and recursive parent traversal describes the tree. They are not interchangeable.
 - A `findOrphans` or `pageStats.true_orphans` mismatch between `:block/page` and ancestry is informational, not damage. Logseq renders from parent links. Never move blocks just to change this count; moving can rewrite order without fixing a user-visible problem.
 - New pages and normally edited pages may contain seeded or trailing empty blocks. Use `pageStats.content_blocks`, not `own_blocks` alone, when judging whether a page has content. Check `is_alias_of` and `aliases` as well; alias relations are not captured by ordinary block/reference counts.
@@ -26,6 +32,7 @@ Use these instructions when working with a Logseq 2.x DB graph through the nativ
 - Use `pageStats` for fixed-size counts. Use `findBacklinks` when the identities of inbound references, tag holders, or property values matter. Those are separate relation types; property-value references may not appear in Logseq's ordinary backlink UI.
 - Use `findEntities` for structured filters, exact counts, projections and cursor pagination; consult the skill's search reference for exact shapes. Output limits do not bound DB scan time. `searchBlocks` accepts only `searchTerm` and returns native `blocks` filtered to case-sensitive literal title matches; native candidate bounds remain, so it is not exhaustive. It has no MCP `regex`, `page_uuid`, or `limit` argument.
 - Prefer server-side/batched tools over a client loop when they fit: `importPage` for whole-page import, `moveBlocks` for sibling runs, and `listJournals(with_counts=true)` for journal triage. Read summaries before large returned row sets.
+- `listPages` accepts only optional `expand`, not `with_counts`, `limit` or offset. Use `pageStats` for selected pages' counts. Counted `listJournals` defaults to the first 500 with no continuation cursor; do not present truncated results as complete. `findDuplicateTitles` is a candidate report, not authorization to repair.
 
 ## Gated last-resort queries
 
@@ -43,12 +50,15 @@ Use these instructions when working with a Logseq 2.x DB graph through the nativ
 - Properties are writable only in the caller's `plugin.property.<caller>/*` namespace. UI-created `user.property/*` and built-in `:logseq.property/*` properties are not writable through these tools. Built-in tags may still have behavior, so adding a tag is not merely cosmetic.
 - Before `deletePage`, inspect backlinks and page stats. It recycles rather than permanently removes the page, leaves references in place, and retains its title until reuse. `createPage` archives recycled-page-only holders as `<title> (<UUID>)` before creating a new identity; preview `planned_archives` and inspect `archived_pages` after real calls. Live/non-page holders return `status: "conflict"`. `renamePage` does not archive holders. Alias loss is a separate, potentially irreparable consequence. Do not set acknowledgement flags without explaining their effect and getting approval.
 - `removeBlock` removes the structural subtree. Inventory it first and confirm before deleting meaningful content or blocks with children. `deleteProperty` removes its values; `deleteTag` can affect holders and child tags.
+- `clearPage` preserves page metadata and property-value subtrees, refuses nested pages, and uses a 1000-block inventory guard. Destructive/subtree workflows can refuse oversized inventories rather than safely processing unlimited content.
 - `moveBlocks` is capped at 50, stops on the first unverified move, and can partially apply. Use `last-child` to append siblings in the supplied order. Its all-or-nothing option cannot restore original positions; record original order before moving anything.
 
 ## Imports, properties, and embeds
 
 - Use `importPage` for a complete page where possible (maximum 500 blocks). Its string form parses bullets and indentation but trims continuation lines and discards blanks. The explicit-depth list form preserves multiline whitespace, but rejects blank blocks and embedded `- ` bullet lines; represent such bullets as child blocks instead. Import escapes page/tag references into `{{link:X}}` and `{{tag:X}}` placeholders; run `repairLinks` after destinations exist. Inspect created UUIDs, headings, parent/page links and sibling order, not just counts. Creating missing pages or tags requires separate explicit acknowledgements and caps.
-- For reference-typed property values (`node`, `page`, `class`, `property`), use actual entity references, not display names. Cardinality `one` replaces; `many` accumulates. Check `listClosedValues` before writing closed-enum properties.
+- For MCP reference-typed property values (`node`, `page`, `class`, `property`), use a freshly read integer entity ID or an object with integer `id`/`db/id`; UUID strings and `{uuid: ...}` fail that guard. Direct HTTP choice APIs have different shapes and are not MCP tools. Cardinality `one` replaces; `many` accumulates. Check `listClosedValues` before writing closed-enum properties.
+- `createProperty` forwards schema/options and verifies the returned type. Retain the canonical returned ident; do not construct it from title/caller spelling. Start with `default`, `number` or `checkbox` fixtures rather than claiming advanced schemas have passed live tests.
+- `createBlock` and `updateBlock` send literal content; import's heading-aware conversion is separate. Record and re-read native heading metadata after an update rather than assuming Markdown markers change it. Nested fenced-code imports can lose content; inspect failed imports without retrying, and prefer Code-tagged blocks with language configured in the UI.
 - An embed is its own block linked to a page or block; it is not a copy, text reference, or empty placeholder. `getBlock`, `getBlockUUID`, and `getBlockTree` include target metadata but do not expand target content. An empty embed title does not mean empty content.
 - `createEmbed(parent_uuid, target_uuid)` takes exact UUIDs for the destination and target. It refuses self/ancestor targets. Its dry run checks UUID existence and ancestry only, not all write-time conditions. If verification fails or the outcome is unclear, call `listEmbeds` for the owning page and target before retrying. The filters combine; `page_uuid` is the owning page only, not a recursive nested-page scope. Check `truncated` before assuming the listing is complete.
 - To remove an embed, call `removeBlock` with the embed block's own UUID. Never remove the linked target to remove the embed.

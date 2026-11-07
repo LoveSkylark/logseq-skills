@@ -44,7 +44,7 @@ or writing a text link. The embed is its own block and points at the target by
 UUID; target content is not copied or expanded into the parent. `listEmbeds`
 can inventory these links by owning page or exact target.
 
-**Properties: your namespace only.** You can create and set
+**MCP properties: your namespace only.** You can create and set
 `plugin.property.<caller>/*`, where `<caller>` is assigned by Logseq from the
 API server's identity rather than chosen — on the graph this was developed
 against it is `_test_plugin`. Properties the user made in the UI live under
@@ -62,7 +62,7 @@ diagnostics rather than treating source-level support as proof of a live result.
 
 **Blocks can be moved.** `moveBlock(block_uuid, target_uuid, placement)`
 relocates a block and its subtree — `child`, `before` or `after` — including
-across pages, and is confirmed on all placements. An earlier version of this
+across pages, through advertised placements. An earlier version of this
 file said there was no route for it and told you to get structure right at
 creation; that is no longer true, so a model that needs to reorganise later is
 viable. Three behaviours still shape how you use it: it no-ops when the
@@ -99,16 +99,19 @@ across arbitrary parents, so a failure could commit part of the tree.)
 ## Property schema
 
 ```
-type:        default | number | string | datetime | checkbox
-             | url | node | page | class | property | map
+type:        default | number | date | datetime | checkbox
+             | url | node | asset | json | string
 cardinality: one (replaces) | many (adds to a set)
 ```
 
-`default` is plain text — not `text`. `string` exists but appears only on
-built-ins.
+These are documented native schema types, not an independently validated
+MCP type enum or proof of live coverage. `createProperty` forwards schema
+and verifies requested versus stored type. Begin with `default`, `number`,
+or `checkbox` one-valued fixtures; retain the normalized returned ident.
 
 **Reference types store entities, not literals.** `node`, `page`, `class`, and
-`property` values are entity ids. A `node` property is the right choice for a
+`property` values use fresh graph-local IDs in MCP. A `node` property is the
+right choice for a
 real relationship between entities; a `default` property holding a name is not,
 because nothing links.
 

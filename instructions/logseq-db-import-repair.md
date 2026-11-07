@@ -7,6 +7,7 @@ Use these instructions to diagnose renderer crashes or suspicious content in a L
 - Ask which exact page fails, what the user sees, and whether it fails after a full Logseq restart. Confirm the problem in the UI before changing data. MCP cannot return the renderer's JavaScript stack trace, and a successful query does not rule out a renderer crash.
 - A normal `pageStats` or `findOrphans` result is not proof that a crashing page is healthy. Conversely, a nonzero orphan count is not itself a symptom: it can describe a harmless difference between `:block/page` and `:block/parent`.
 - Read the affected page and identify exact block UUIDs before proposing a repair. Use `inspectPage(page_uuid, detail="blocks")`, `getBlock`, and `getBlockTree` as needed. Keep a short ledger of target UUID, observed state, suspected cause, proposed edit, and verification.
+- Treat historical crash examples as hypotheses, not current-build guarantees. The native E2E checklist records no live passes; distinguish source behavior, automated fixtures and user-confirmed UI results.
 
 ## Non-negotiable repair rules
 
@@ -52,7 +53,7 @@ Return a table with one row per meaning/use group, including the legacy tag, exa
 A heading containing nothing but a single wiki-link has reproduced the DB renderer crash, both for self-links and links to other pages. If the UI symptom is confirmed and the block matches this shape:
 
 1. Read the block by UUID and record its content, parent, and heading level.
-2. Use `updateBlock` to replace the heading's linked text with short plain descriptive text. Keep the markdown heading marker (`#`, `##`, and so on) if it should remain a heading; the parser stores the heading level as a built-in property.
+2. Use `updateBlock` to replace the heading's linked text with short plain descriptive text. Do not prepend Markdown heading markers to preserve the level: single-block update is not import's heading-conversion route. Record and independently verify the native heading property.
 3. Read the same UUID again. Confirm its parent and heading level remain, the text is the replacement, and the `refs` edge for the heading-only link is gone.
 4. If the link's information still matters, add it back as an ordinary sibling or child block, not as the entire content of a heading.
 
@@ -61,8 +62,8 @@ A heading containing nothing but a single wiki-link has reproduced the DB render
 An empty block can retain a raw link edge after a legacy block-reference/embed was cleared. It may be a dangling migration artifact, but an empty title alone does not prove that it is junk: native embeds are linked views with their own UUIDs and can also have empty titles.
 
 1. Call `listEmbeds` for the block's owning page and compare the suspect block UUID with returned embed UUIDs. The page filter is not recursive; inspect the actual owning page. Check `truncated` and increase the limit if needed. A listed embed is legitimate linked content unless the user explicitly wants that embed removed.
-2. If it is not a listed embed, inspect the page with `inspectPage(detail="properties")`. Look for `property.ident == "link"`; then call `getBlock` on each candidate to confirm the exact block, its empty content, and link metadata. `listEmbeds` is not a query for every raw `:block/link` value.
-3. Remove only a confirmed invisible, dangling, purposeless stub. Pass the stub's UUID to `removeBlock`; never remove its visible parent or the linked target. Read back and confirm the stub is absent and its parent remains intact.
+2. Use `findEntities` with `kind: "block"`, the exact `page_uuid`, and `where: {"all":[{"field":"title","op":"empty"},{"field":"has_link","op":"eq","value":true}]}`. Select UUID/title/parent and check truncation; use the returned cursor unchanged before any graph writes. `has_link` is structural, not a textual-backlink or dangling-target test. `getProperyUsers` accepts only exact namespaced property idents, not raw `"link"`.
+3. Inspect each candidate with `getBlock`, its embed/target metadata, descendants and references. Remove only a confirmed purposeless stub with explicit approval. Pass its UUID to `removeBlock`; never remove its parent or linked target. Read back and confirm the stub is absent and its parent remains intact.
 
 ## Bisection when the cause is unknown
 

@@ -9,6 +9,17 @@ For a Logseq 2.x **DB** graph connected to the native MCP server built into
 Logseq Desktop. Do not load a file-graph or legacy Logseq skill in the same
 conversation.
 
+## Evidence and interface boundaries
+
+Native Desktop HTTP commands and MCP tools are different interfaces.
+An API reference does not add tools, arguments, permissions, or verification
+to MCP. Use the connected tool's advertised schema and result.
+
+The current native regression checklist records no live passes. Source review,
+automated fixtures, a written test procedure, and an actual UI/graph test are
+different evidence. Report which you have; do not describe a checklist as a
+successful live run or enable write probes on a real graph to obtain one.
+
 ## The governing fact
 
 **This API returns success for calls that do nothing.**
@@ -17,16 +28,8 @@ A wrong identifier type, a name where a UUID belongs, or an unsupported
 combination produces `null` or `{:block 1}` — the same responses a successful
 write produces. Nothing at the transport layer distinguishes them.
 
-Observed:
-
-| Call | Response | What happened |
-| --- | --- | --- |
-| a page *name* where a parent UUID belongs | the created block | **a block created at the top of that page.** `insertBlock` RESOLVES a page title — confirmed 2026-09-20. It used to write nothing, which is where the "names are inert" rule came from; that was `upsertNodes`, a route nothing uses now. So a mistyped argument no longer fails harmlessly, and the tools' UUID validation is the only thing stopping it. |
-| `removeProperty` given a UUID | `null` | nothing removed |
-| `upsertProperty` with an explicit ident | full entity | ident silently discarded |
-| `removeBlock` given a UUID | `null` | block actually deleted |
-
-Every rule below follows from this. In particular:
+MCP validates identifiers and arguments before its native API calls, but a
+raw API response alone still does not establish the requested graph state.
 
 **Every write tool already performs the second call.** A tool does not just
 send the mutation — it reads the target back afterwards and compares. So
@@ -107,8 +110,10 @@ Each entity kind has one canonical key. The wrong one fails silently.
 | tag | UUID for relations | `getTagUUID(title)` |
 | property | `:db/ident` — a UUID here is a no-op | `getPropertyIndent(title)` |
 
-`:db/id` integers appear in results. They are internal, renumbered when a graph
-is rebuilt, and are never accepted as identifiers. Do not persist them.
+`:db/id` integers are graph-local and can change on rebuild. Use UUIDs for
+entity targets and exact idents for properties. Reference-property values
+can require a freshly read integer ID; that is not permission to persist it
+or use it as a target UUID.
 
 Resolve titles to identifiers **before** any write, and never select a
 destructive target from an ambiguous result. The resolver tools return
@@ -134,6 +139,13 @@ means creation can attempt archive-and-reuse, not that all write-time safety
 checks passed. Preview with `createPage(title, dry_run=true)` and inspect
 `planned_archives`. After a real call inspect `archived_pages` as well as
 `created` and `verified`; archiving and creation are not atomic.
+
+**Case-variant creation is a known defect.** Exact-title preflight can miss
+an existing case variant and native creation can return that existing page
+as verified. Check the page inventory for case variants before creation;
+afterward verify the exact requested title and compare the returned UUID
+with preexisting holders. `verified: true` alone does not prove a new page
+was created in this case. Stop and report the collision rather than retrying.
 
 Recycling alone keeps the title. Restore a recycled page through Logseq's
 Recycle UI when restoration, rather than creation of a new identity, is wanted.
@@ -241,17 +253,15 @@ benefit. This was learned the expensive way: a repair tool was built on the
 assumption that these blocks were invisible, and roughly 1,500 blocks were
 moved before anyone opened the page and saw the text rendering fine.
 
-## A page is never empty
+## An empty page may still contain blocks
 
-`createPage` seeds every new page with one empty block, and Logseq leaves a
-trailing empty block behind ordinary editing. So a block count on a page made
-through this API is never 0, and every count of "how much is on this page" is
-high by however many empty blocks exist.
+`createPage` may seed an empty block, and ordinary editing may leave trailing
+empty blocks. Record the actual inventory; do not assume either zero blocks
+or exactly one seed on every empty page.
 
 This matters most where a count feeds a decision. The rule that emptiness
-alone is never grounds to delete has a converse: a genuinely empty page still
-reports a block, so an audit searching for empty pages by `own_blocks == 0`
-finds nothing at all.
+alone is never grounds to delete has a converse: an empty page can still
+report blocks, so `own_blocks == 0` alone misses candidates.
 
 `pageStats` therefore reports three figures rather than one:
 
@@ -291,34 +301,28 @@ the same page with `createBlock` would be 68 requests and 68 responses.
 
 So prefer the tool that loops internally over the loop you write yourself:
 
-- `repairLinks()` with no page over one call per page
+- scoped `repairLinks` over one `updateBlock` per placeholder
 - `importPage` over a `createBlock` per line
 - `moveBlocks` over a `moveBlock` per block
 - `pageStats` over `inspectPage` when you only need counts
 - `listJournals(with_counts=true)` over a `pageStats` per journal
 - `clearPage` over a `removeBlock` per block
 
-**Relocating a run of blocks is one call.** `moveBlocks(block_uuids[],
-target_uuid)` moves a list in the order given, at two API calls per block
-rather than the eight a single `moveBlock` needs. This is the journal-to-page
+**Relocating a run of blocks is one tool call.** `moveBlocks(block_uuids[],
+target_uuid)` moves a list in the order given. This is the journal-to-page
 migration shape, and it is the difference between a chapter being affordable
 to move and being rewritten by hand. It stops at the first block that does not
 verify and reports which UUIDs landed, so a partial result is legible rather
 than a mystery.
 
-**Triage with counts, not with reads.** `listJournals(with_counts=true)` and
-`listPages(with_counts=true)` attach `own_blocks`, `content_blocks` and `refs`
-to each entry in four queries total, however many pages there are. Deciding
-which journals are worth reading otherwise costs one `pageStats` per journal,
-which is the most common opening move of a migration and was around fifty
-calls to answer one question. Pair `content_blocks` with `refs`: a journal
-with `content_blocks: 0` holds nothing but its seeded empty block, whatever
-`own_blocks` says.
-
-Both stay opt-in, so the bare listing is unchanged and still cheap. With
-counts they return an envelope — the list under `journals` or `pages`, plus
-`total`, `counted` and `truncated` — because `listPages` is capped at 500 per
-call and a capped result has to be able to say so.
+**Triage with the correct inventory.** `listPages` accepts optional `expand`,
+not `with_counts`, `limit`, or an offset. It is unpaginated; use `pageStats`
+on selected pages when counts matter. `listJournals(with_counts=true)`
+returns a counted envelope, defaulting to the first 500 journals with no
+continuation mechanism. Check `truncated`; do not invent successive slices.
+For paged identity discovery use `findEntities`.
+Pair `content_blocks` with references and inspect empty linked blocks before
+calling a page unused.
 
 And when a tool does return something proportional to the damage — a plan, a
 list of orphans — read the summary rather than the list unless you intend to
@@ -359,8 +363,8 @@ On a failure, terse keeps the observed entities as digests rather than
 collapsing them to a count, because a write cannot safely be re-run to get
 detail.
 
-This also means slowness is not cost. A sweep that takes a minute of internal
-calls is cheap; the same work as individual tool calls is not.
+Fewer tool round trips do not imply cheap database execution. Scope large
+operations and check responsiveness rather than assuming a bulk scan is free.
 
 ## Start with capabilities
 
@@ -421,9 +425,10 @@ Prefer the narrowest tool that answers the question.
    many pages with them is expensive and this is not.
 6. `getTagUsers(tag_uuid)` and `getProperyUsers(ident)` answer "what uses
    this?" — run either before deleting, and report the count to the user.
-7. The `list*` tools return a whole kind. Most take no arguments;
-   `listPages` and `listJournals` take `with_counts`, which is the cheap way
-   to find which pages hold content.
+7. `listPages` accepts optional `expand`; it has no count/pagination args.
+   `listJournals` separately accepts `with_counts` and `limit`.
+   `findDuplicateTitles` reports candidates, not approved repairs; see
+   [repair guidance](./reference/repair.md).
 
 Keep `uuid` and `ident` in the working plan. Do not reduce an entity to its
 display text; titles are not unique and are not identifiers.
@@ -469,8 +474,8 @@ second page and left the original alone.
 inbound references do not move.
 
 `clearPage(page_uuid)` empties a page but keeps it, along with its tags and
-property values. It is one call per top-level block, since the API has no batch
-delete, so it is slow on a large page.
+property-value subtrees. It refuses nested pages and inventories at most
+1000 blocks. It is not a promise to remove every block, nor a transaction.
 
 ### Blocks
 
@@ -492,7 +497,7 @@ Logseq markdown. `target` is a page UUID to write into, or a title to create.
 One call carries the whole page, so a 68-block page costs one tool call rather
 than 68.
 
-> **Logseq parses content on write.** `## X` becomes a native heading — which
+> **Heading-aware import converts content.** `## X` becomes a native heading — which
 > is wanted — but `[[X]]` MINTS A PAGE and `#X` MINTS A TAG, rewriting the text
 > to point at the new entity. An import whose links point at pages that do not
 > exist yet would create a stub for every one.
@@ -511,11 +516,11 @@ than 68.
 > The content is inert until repaired. **Tell the user this** — the links they
 > wrote will not work until the second step.
 
-`repairLinks()` is that second step. Omit the page UUID to scan the whole
-graph, which is usually right: links resolve only once their targets have been
-imported, so the natural order is import everything, then repair once.
+`repairLinks` is that second step. Scope it to approved pages after their
+destinations exist. Omitting the page UUID scans the whole graph; use that
+only for an explicitly graph-wide repair, not to widen a page-level request.
 
-It is safe to re-run. Names that match no target are skipped and reported —
+After a successful, reconciled run it can be resumed. Names that match no target are skipped and reported —
 links under `missing` with near-miss suggestions, tags under `tags_missing` —
 and names matching several candidates are skipped rather than guessed.
 
@@ -555,8 +560,8 @@ the affected subtree and diagnostics before retrying; `findOrphans` alone
 cannot establish completeness or order.
 
 `moveBlock(block_uuid, target_uuid, placement)` relocates a block and its
-subtree — `child`, `last-child`, `before` or `after`. Confirmed working on all
-placements, including across pages. The API returns nothing, so the tool
+subtree — `child`, `last-child`, `before` or `after`, including across pages.
+The tool
 verifies the new parent, the owning page, and that descendants followed.
 
 Three behaviours matter when using it directly:
@@ -596,14 +601,14 @@ name. The ident is assigned by Logseq; retain the one returned.
 > outside the sandbox. This is a Logseq restriction, not a server limitation —
 > do not look for a workaround, and tell the user plainly.
 
-Reference-typed properties (`node`, `page`, `class`, `property`) take an entity
-id, not a literal — a string is accepted by Logseq and mints a value entity
-named after it, which reads back as success while pointing at nothing. The
-tool refuses that before the call.
+For properties identified as reference-typed (`node`, `page`, `class`,
+`property`), MCP `addProperty` accepts an integer entity ID or an object
+with an integer `id` or `db/id`; UUID strings and `{uuid: ...}` are refused.
+Resolve/read the intended entity immediately and use its graph-local ID;
+do not infer that direct HTTP choice APIs have the same value shape.
 
-Cardinality-many properties accumulate rather than replace, so writing the
-same value twice would add a duplicate. The tool detects that and skips the
-write.
+Cardinality-many properties accumulate rather than replace. The tool detects
+an already-present value and skips the duplicate addition.
 
 `deleteProperty` removes the definition graph-wide and takes every value with
 it. Recreating mints a new entity — the old values do not return. It requires
@@ -681,7 +686,7 @@ it keeps pointing at a page the user can no longer find. `deletePage` refuses
 until `acknowledge_reference_rewrite` is set when references exist — surface
 that to the user rather than setting it reflexively.
 
-**`moveBlock` is confirmed working** on all placements, including across
+**`moveBlock` supports** all advertised placements, including across
 pages. Three behaviours to know when calling it directly: it no-ops when the
 position would not change (reported as `verified: false`, which is correct),
 `placement=child` prepends while `last-child` appends, and a move carries the
@@ -692,7 +697,7 @@ at the first block that does not verify, and reports which UUIDs landed.
 
 **Reads** — `capabilities`, `getPageUUID`, `isTitleAvailable`, `inspectPage`,
 `getContentCapabilities`, `pageStats`, `getBlockUUID`, `getBlock`,
-`findEntities`, `searchBlocks`, `getBlockTree`, `listEmbeds`,
+`findEntities`, `searchBlocks`, `findDuplicateTitles`, `getBlockTree`, `listEmbeds`,
 `findBacklinks`, `findOrphans`, `getTagUUID`, `getTag`, `getTagUsers`,
 `getPropertyIndent`, `getProperyUsers`
 
@@ -700,8 +705,8 @@ at the first block that does not verify, and reports which UUIDs landed.
 `listProperties`, `listClosedValues`, `listOrphanTags`,
 `listOrphanProperties`, `listAssets`, `listStatus`, `listRecycled`
 
-Most take no arguments; `listPages` and `listJournals` take `with_counts` and
-`limit`.
+Most take no arguments; `listPages` takes `expand`, while `listJournals`
+takes `with_counts` and `limit`. Neither supplies a continuation cursor.
 
 **Writes** — `importPage`, `repairLinks`, `createPage`, `renamePage`,
 `retitleOverDuplicate`, `deletePage`, `clearPage`, `createBlock`,

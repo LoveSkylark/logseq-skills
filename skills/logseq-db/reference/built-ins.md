@@ -4,6 +4,11 @@ Read from a live graph on 2026-09-20, Logseq `2.0.1-alpha+nightly.20260826`,
 via `listTags`, `listProperties` and `listClosedValues`. Entity ids are from
 that graph and are NOT stable across a rebuild — the idents are.
 
+This is a historical inventory, not a current-build live test result.
+Resolve current tags/properties/choices again. The native regression checklist
+does not record live passes for these workflows, and direct HTTP property
+permissions or value shapes must not be transplanted into MCP.
+
 Tagging is not decoration. A built-in class carries behaviour: it declares
 properties, and in some cases changes how the node renders. `#Code` turns a
 block into a code block because the class does that, not because of anything
@@ -67,7 +72,7 @@ property** — that is worth knowing before treating its output as an inventory.
 | Apply template to tags | `:logseq.property/template-applied-to` | class, many | On the template, naming its target tag |
 
 **Closed enums.** `Status` and `Priority` take one of a fixed set of VALUE
-ENTITIES, not a string. Call `listClosedValues` and pass the entity id. Status
+ENTITIES, not a string. Call `listClosedValues` and inspect the current value entities. Status
 has six (Backlog, Todo, Doing, In Review, Done, Canceled) and Priority four
 (Low, Medium, High, Urgent). Note that `getAllProperties` reports the set as
 `:property/closed-values`, but no such datom exists — the real attribute is
@@ -76,7 +81,7 @@ has six (Backlog, Todo, Doing, In Review, Done, Canceled) and Priority four
 **`Description` holds a block.** Its value is an entity id referring to a
 block, so reading it gives you a reference and needs a second read to get text.
 
-## None of this is writable
+## MCP property writes are restricted
 
 All of the above are `:logseq.property/*` or bare built-in idents, and the
 plugin sandbox permits writes only to `plugin.property.<caller>/*`.

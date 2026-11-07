@@ -69,8 +69,12 @@ from being recycled; `Mechanics` carries two aliases of its own.
 `findDuplicateTitles()` is the front end to everything in this file. It groups
 pages and tags whose titles may name the same thing and attaches the evidence
 to classify each group — both content counts, both reference counts, and alias
-status — in six queries whatever the graph size. Start here rather than
+status. Start here rather than
 reading titles or running a `pageStats` per page.
+
+It is an advertised MCP report, not a native HTTP repair command.
+`normalize` accepts `exact`, `loose`, or `fuzzy`; fuzzy matching is capped
+at 2000 candidates. Inspect limitations before claiming graph completeness.
 
 It returns a `classification` per group mapping onto the classes below:
 `dead_stub` (A), `split_identity` (B), `genuine_split` (C), `near_title` (E),
@@ -86,20 +90,21 @@ instruction.** Confirm a symptom in the UI before any write.
 
 ## Counting cheaply
 
-Start with a counted LISTING, not a per-page read.
-`listPages(with_counts=true)` and `listJournals(with_counts=true)` attach
-`own_blocks`, `content_blocks` and `refs` to every entry in four queries
-total, which covers the whole first triage pass — which pages hold content,
-and which of the empty ones are referred to anyway. `listPages` is capped at
-500 rows per call, so a larger graph needs `limit` and successive slices.
+Start with the correct inventory. `listPages` accepts only optional `expand`;
+it has no `with_counts`, limit or offset. Use the candidate report and
+`pageStats` on selected pages. `listJournals(with_counts=true)` has its own
+counted envelope, defaulting to the first 500 with no continuation mechanism.
+Use `findEntities` for paged page identity discovery when needed; do not
+invent successive listing slices.
 
 `pageStats(page_uuid)` is then the per-page primitive, for the pages the
 listing singled out. It returns integers only, so its cost does not depend on
 how large the page is — the whole point of the tool, and what made a
 full-graph audit affordable before the listings could do it in bulk.
 
-- `own_blocks` — blocks whose `:block/page` is this page. This is "does the
-  page have content".
+- `own_blocks` — blocks whose `:block/page` is this page, including empty
+  seeds. Pair `content_blocks` with references when judging content, and
+  inspect empty linked blocks before treating them as purposeless.
 - `subtree_blocks` — everything reachable by `:block/parent`, **including
   nested pages**. Using this as a content count will make an empty container
   look populated.
@@ -135,9 +140,9 @@ the classes have different repairs and two of them are not damage at all.
 
 | Class | Signature | Repair |
 | --- | --- | --- |
-| **A — dead stub** | 0 own blocks, 0 refs, **no alias relation**, twin has content | Recycle the stub |
-| **B — split identity** | 0 own blocks, **has refs**, twin has content | `retitleOverDuplicate`, or repoint/rebuild (below) |
-| **C — genuine split** | Both have own blocks | Stop. Human decision |
+| **A — dead stub** | No meaningful content, 0 refs, **no alias relation**, twin has content | Confirm the stub, then recycle |
+| **B — split identity** | No meaningful content, **has refs**, twin has content | Repoint or relocate/rebuild content with approval |
+| **C — genuine split** | Both have meaningful content | Stop. Human decision |
 | **D — nested structure** | One is a sub-page of a container | Not damage. Leave |
 | **E — near-title variant** | Titles differ (typo, case, singular/plural) | `retitleOverDuplicate` |
 

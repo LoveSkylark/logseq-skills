@@ -37,8 +37,9 @@ tag UUID or property-ident filters:
 {"field":"position","op":"eq","value":"first_outline_child"}
 ```
 
-`position` is block-only. Title matching is literal; do not assume fuzzy or
-regex behavior. `has_link` tests a link edge, not whether text contains a
+`position` is block-only. Title matching is literal and case-sensitive; do
+not assume fuzzy or regex behavior. A missing or non-page `page_uuid` is an
+error, not an empty result. `has_link` tests a link edge, not whether text contains a
 wiki-link. It does not prove that an empty linked block is a dangling stub:
 inspect embed metadata and the target before proposing removal.
 
@@ -102,6 +103,18 @@ The envelope contains `output`, `matches`, `count`, `count_is_exact`,
 
 Output limits and filter bounds do not bound DB scan time. Scope to the
 requested page when possible and avoid repeated graph-wide scans.
+
+## Other inventories are not cursor searches
+
+`listPages` accepts only optional `expand` and returns an unpaginated
+inventory. Do not pass `with_counts`, `limit`, or an offset to it.
+Use `pageStats` for selected pages' counts.
+
+`listJournals` separately supports `with_counts` and `limit`; counted mode
+defaults to the first 500 journals and has no offset or continuation cursor.
+A truncated counted listing is not complete graph evidence. Use
+`findEntities` for paged page identity discovery when appropriate, not an
+invented listing pagination argument.
 
 ## Simple native search
 
