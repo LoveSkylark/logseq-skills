@@ -2,14 +2,14 @@
 
 Exact shapes and verification steps. Read before an unfamiliar write.
 
-Every write returns `verified`, `verified_state`, and on failure
-`previous_state` and `observed_state`. **`verified=false` is a failure**, even
-though no error was raised — this API reports success for calls that do
-nothing, so the read-back is the only evidence.
+Check `verified` and the tool-specific result; there is no universal
+`verified_state`/before/after envelope. **`verified=false` is not a completed
+write**: it can describe a conflict, no-op, partial mutation, failed read-back,
+or dry run. Read diagnostics and actual state before considering a retry.
 
 ## verbose
 
-Every write tool takes `verbose`, default `true`. The envelope carries the
+Use `verbose` only where the advertised tool schema supports it. The envelope carries the
 target entity twice, before and after, so a write to a long block returns that
 block's text twice over.
 
@@ -33,18 +33,24 @@ pair is how you see what Logseq did to the content you sent.
 createPage(title)
 ```
 
-A title already held by any page, tag or block is rejected — the three share
-one title space, and the check counts RECYCLED pages too, since recycling
-keeps the entity. Call `isTitleAvailable(title)` first if the title might be
-taken: it runs this same check and names the holder, including whether it is
-recycled. `getPageUUID` returning `found: false` is not evidence the title is
-free — it is recycle-blind by design.
+A live or non-page title holder returns `status: "conflict"`, `created: false`,
+`verified: false`, and `held_by`, without creating the page. This is a normal
+MCP result, not necessarily `isError: true`.
+
+If every holder is a recycled page, creation archives each as
+`<original title> (<UUID>)`, preserving its UUID, recycled state and block
+inventory, then creates the requested title. `isTitleAvailable` can report
+`available: true, recycled: true` with `held_by`; that is a reuse plan, not
+proof of write-time archive safety. Preview `planned_archives` with `dry_run`.
+Inspect `archived_pages` after real calls, especially on failure: archiving
+and creation are not atomic. A missing `getPageUUID` result alone proves neither
+availability nor successful archiving.
 
 Routed through `logseq.DB.createPage`, not `upsertNodes`. Two reasons:
 `upsertNodes` fails outright on synced graphs, returning "The Imported EDN has
 N validation error(s)" for a write its own dry run accepts; and `createPage`
-is idempotent on title, so a repeat returns the existing page rather than a
-duplicate.
+is idempotent on title internally. The MCP wrapper still rejects live title
+conflicts; do not retry an ambiguous creation based on the API's idempotence.
 
 Its second argument is a PROPERTIES map, not options. Passing
 `{"dry-run": true}` creates the page anyway and mints a `dry-run` property in
@@ -64,16 +70,16 @@ original UUID is re-read and its title compared. The check also confirms
 `:block/name` survived — a rename that stripped page identity would otherwise
 look like success.
 
-A title another entity already holds is rejected, for the same reason as
-`createPage` — and on the same recycle-aware check, so a title whose only
-holder is a recycled page is refused. `isTitleAvailable(new_title)` reports
-that before the attempt.
+A title another entity holds is rejected. Unlike `createPage`, rename does
+not archive recycled holders, and it refuses a recycled source page.
+`isTitleAvailable` reports creation reuse eligibility, not rename eligibility.
 
 `retitleOverDuplicate` is the way THROUGH that rejection when the holder is an
 empty duplicate. It renames the holder to `"<to_title> (parked)"`, then renames
 `from_uuid` onto the freed title — two renames, no block edits, and every
-inbound reference on both pages intact, since references are by UUID. It works
-on a recycled holder too: renaming a recycled page is what releases its title.
+inbound reference on both pages intact, since references are by UUID. It does not archive recycled holders; its parking step uses `renamePage`,
+which refuses recycled sources. Use the separate `createPage` reuse policy
+only when a new page identity is actually desired, not as a repair shortcut.
 
 It refuses, returning both pages' inbound reference counts rather than raising,
 when the holder has content blocks, when the holder is in an alias relation, or
@@ -290,13 +296,13 @@ verbatim. A JSON-encoded array is accepted too, since some clients cannot
 send a real one — and getting that wrong once cost six of eight lines,
 because the string arrived at the markdown parser instead.
 
-**Use the list form for any block containing newlines.** The string form
-cannot express them. A blank line inside a block is dropped, leading
-whitespace is stripped, and a line beginning with `- ` becomes a CHILD of the
-block rather than part of it — so an eight-step sequence with a nested bullet,
-a markdown table, or a fenced code block fragments. That is what forces a
-`createBlock` fallback part-way through an import, and it is the one thing the
-list form exists to prevent.
+**Use the list form to preserve multiline whitespace.** String continuation
+lines are trimmed and blank lines discarded. List text preserves those
+characters, but blank blocks and embedded `- ` bullet lines (including
+indented ones) are rejected before insertion because Logseq truncates them.
+Represent nested bullets as separate child entries with explicit depth,
+not as bullet text inside one block. Do not fall back to `createBlock` to
+bypass this validation.
 
 Depth is required rather than inferred there, and a skipped level is an ERROR
 rather than a warning: indentation stops distinguishing structure from content
@@ -307,6 +313,14 @@ Same in both forms: references are escaped to `{{link:X}}` and `{{tag:X}}`,
 and markdown headings convert to native Logseq headings. Different: page
 properties are only parsed from a string, so `key:: value` as a list element
 is simply block content.
+
+Both forms are capped at 500 blocks. A title target follows `createPage`'s
+conflict/archive policy; use an exact page UUID to import into an existing
+page. Verification checks created UUIDs, titles, heading levels, parents,
+page ownership and sibling order. Read `created_uuids`, `observed_blocks`,
+and `observed_empty_seed_blocks`; at most one late empty seed is tolerated
+only when the baseline page inventory was empty. Failed verification can
+mean partially committed content, not an empty page.
 
 Existing content is NOT appended to — `insertBatchBlock` **prepends**,
 confirmed 2026-09-20. New blocks land ABOVE what the page already held, and a
@@ -326,6 +340,12 @@ every reference to them.
 updateBlock(block_uuid, title)
 removeBlock(block_uuid)
 ```
+
+`updateBlock` rejects blank text and any line starting with a bullet
+(`-` followed by whitespace, optionally indented). It has no heading-level
+argument. Do not assume adding/removing Markdown markers changes native
+heading metadata; record the heading property and read it back after editing.
+Import's explicit heading conversion is a separate route.
 
 `removeBlock` takes the whole subtree and verifies every descendant is absent,
 not just the root. Subtrees over 1000 nodes are refused rather than partially
@@ -407,9 +427,11 @@ mints a new entity and the old values do not return.
 Run `getProperyUsers(ident)` first. An empty result makes this safe; anything
 else is data you are about to destroy.
 
-This route is **unverified**. The UUID form is confirmed to do nothing; whether
-the ident form works has not been established. Check `verified` — `false` here
-means the definition is still in place, not that the values are half gone.
+The handler calls the property-removal route and verifies that the definition
+and its users are gone, then checks value-block cleanup. This is source-level
+verification logic, not proof the installed app completed a live deletion.
+Require `verified`; on failure inspect the definition, users and cleanup
+diagnostics rather than assuming everything remains intact.
 
 ---
 
@@ -450,8 +472,9 @@ also checks for it after every tag change.
 deleteTag(tag_uuid)
 ```
 
-**Unverified route.** It goes through `deletePage`, which has never been run
-against a tag, and whose identifier type is unconfirmed. Check `verified`.
+The handler uses the native page-deletion route, then verifies the tag is
+absent and no dangling tag/reference relations remain. Check `verified` and
+diagnostics; source verification logic is not a live deployment guarantee.
 
 Run `getTagUsers(uuid)` first. Deleting a tag with child tags requires
 `acknowledge_child_reparent=true`.
@@ -460,9 +483,10 @@ Run `getTagUsers(uuid)` first. Deleting a tag with child tags requires
 
 ## When a write reports verified=false
 
-Read `previous_state` and `observed_state`. Identical means nothing happened —
-almost always an identifier of the wrong type. Different means something
-happened, but not what was asked, which is more serious.
+Read `diagnostic`, `status`, and the before/after fields actually returned.
+They are tool-specific; inspect exact UUIDs and affected subtrees if the
+result does not establish what landed. A count alone cannot establish content,
+heading, identity or order.
 
 Do not retry. A repeat with the same arguments produces the same silent
 no-op, and if the first call *did* land, a second may duplicate it.

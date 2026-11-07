@@ -21,15 +21,15 @@ title and nothing else. There is no `upsertNode`. Even a generic upsert would
 not help — upsert *resolves on* the identity attribute, so a different UUID
 selects a different entity rather than renaming one.
 
-**Deleting frees nothing.** Recycling keeps the UUID, tags, refs and blocks,
-and it keeps the TITLE: the entity survives, so `createPage` and `renamePage`
-both still refuse that title. An earlier version of this file said a title was
-"released for reuse" — it is not, and acting on that cost a repair. What makes
-it hard to notice is that `getPageUUID` reports such a title as not found,
-which is correct for a resolver and reads as "free". Ask
-`isTitleAvailable(title)` instead: it uses the writers' check and reports
-`held_by` with `recycled: true`. Never recycle a page expecting to reuse its
-title — there is no undo, and the title stays taken.
+**Recycling preserves identity; reuse is a separate mutation.** A recycled
+page retains its UUID, tags, references, blocks and title. `getPageUUID`
+excludes it, so a resolver miss is not proof the title has no holder.
+`isTitleAvailable` reports holders and recycled-page-only reuse eligibility.
+`createPage` can archive those holders as `<title> (<UUID>)` before creating
+a new identity; preview `planned_archives` and inspect `archived_pages` after
+real calls. This is not restoration or reference repointing, and it is not
+atomic. `renamePage` does not apply this reuse policy. Never recycle a live
+page merely to work around a conflict; first review references and aliases.
 
 **Empty does not mean safe.** The most common serious error is recycling an
 empty page that is the target of live references. Content and identity land on
@@ -163,8 +163,8 @@ onto the freed title.
 
 `retitleOverDuplicate(from_uuid, to_title)` does both renames. `Creatvity` →
 `Creativity` is two calls with the attribute matrix untouched, because
-references are by UUID and a rename does not disturb them. It works even when
-the holder is recycled — renaming a recycled page is what releases its title.
+references are by UUID and a rename does not disturb them. It does not archive recycled holders: its parking step calls `renamePage`,
+which refuses recycled sources. Do not use it to promise recycled-title reuse.
 
 It refuses, and hands back the counts instead, when:
 
@@ -192,10 +192,11 @@ user on a blank page while the real material sits elsewhere under the same
 title. Identical creation timestamps across many such pairs indicate one bad
 import rather than user error.
 
-Three routes, and `retitleOverDuplicate` is usually the first to try: if B is
-empty, giving A the title and parking B is two calls and touches no blocks at
-all. The two routes below are for when B has content, when an alias is
-involved, or when the reference target itself has to change.
+Choose whether to preserve A's content identity or B's referenced identity.
+`retitleOverDuplicate` changes titles, not reference targets or block ownership;
+parking B and retitling A does not make B's inbound references display A's
+content. Use the repoint or rebuild routes below when identity and content
+really are split; a title-only repair is appropriate only for a naming symptom.
 
 **Repoint via placeholders** — the usual choice when renaming will not do.
 De-resolve each reference to

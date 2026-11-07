@@ -1,23 +1,19 @@
 # Troubleshooting
 
-Read when a write reports `verified=false`, a call times out, or writes stop
-being accepted.
+Read when a write reports `verified=false`, a call times out, or a structured
+lookup fails. Results are tool-specific, not a universal failure envelope.
 
 ## Symptoms
 
 | What you see | What it means | What to do |
 | --- | --- | --- |
-| `verified=false`, `previous_state` == `observed_state` | The write did nothing. Almost always an identifier of the wrong type. | Re-resolve the identifier. Do not retry with the same arguments. |
+| `verified=false` | The requested state was not verified; this can be a no-op, partial write, failed read-back, or dry run. | Read `diagnostic`, any supplied before/after fields, and exact target state before deciding what to do. |
 | `verified=false`, states differ | Something happened, but not what was asked. | Read the target fully before anything else. This is the more serious case. |
-| `failure_stage: validation` | Rejected before reaching Logseq. | The `diagnostic` names what was passed — a title, an ident, a placeholder. Fix and retry. |
-| `failure_stage: logseq_error` | Logseq returned an error. | Read it; it is usually specific. `"Editing a page, tag or property isn't supported yet"` is a hard limit, not a transient failure. |
-| `failure_stage: transport` | Never got a reply. | The outcome is unknown. Read the target to find out. |
-| `failure_stage: readback_mismatch` | The write returned, the read-back disagreed. | Same as `verified=false` above. |
+| MCP `isError: true` | A thrown exception or API error. Native handlers do not promise a `failure_stage` or structured error code. | Read the error text. If writes could have begun, inspect actual state before retrying. |
+| `status: "conflict"`, `created: false`, `verified: false` | A live/non-page holder prevents page creation. This can be a transport-successful MCP result. | Inspect `held_by`; do not claim creation succeeded. |
+| `archived_pages` in an unverified creation/import | Some recycled holders may already have been renamed before a later step failed. | Inspect those exact UUIDs and the requested title before retrying. |
 | `createEmbed` verification failed or timed out | The embed may already have been created even though verification did not complete. | Inspect `listEmbeds` using the owning page and target UUIDs before retrying. |
 | An embed has an empty title | Linked target content is not copied into the embed block's title. | Use `getBlock` or `listEmbeds` to inspect target metadata. Do not treat a confirmed embed as an empty placeholder or remove its target. |
-| `writes_disabled` in `capabilities` | A previous write timed out ambiguously and the circuit opened. | See below. |
-| A read is fine but every write is refused | Same circuit. | See below. |
-| `PermissionError` on a write | An operator scope (`LOGSEQ_WRITE_*`) excludes the target. | Configuration, not a bug. Tell the user which scope. |
 | `"outside this caller's namespace"` | A `user.property/*` or built-in property write. | Not possible over HTTP. Do not look for a workaround. |
 | `deletePage` refuses with a reference count | Entities link to the page and those links are not rewritten. | Report the count to the user; only set `acknowledge_reference_rewrite` once they have decided. |
 | A page "deleted" but still readable by UUID | Expected. Deleting recycles: the entity survives with `:logseq.property/deleted-at`. | Check `listPages` excludes it. Use `listRecycled` to see it. |
@@ -26,8 +22,9 @@ being accepted.
 | A user says content is missing from a page | Check the page in the Logseq UI before believing any count. | A count disagreement is not evidence of missing content. Confirm the symptom first. |
 | A tool call returns "no result received after 4 minutes" | The client stopped waiting; the server usually kept working and committed. | Do not retry blindly. Re-read state to see what landed. Bulk operations need a batch limit so each call returns in time. |
 | A large query returns `[]` when a `(count …)` of the same clauses returns thousands | Almost always a MALFORMED query, not size. An inline `#uuid "…"` or a quoted string inside the query text breaks the JSON body, and the failure looks like an empty result. | Pass strings and UUIDs as `:in` parameters instead of inlining them. Confirm the query runs at all with a `(count …)` form first. |
-| `searchBlocks` returns `matches: 0` | A real zero. The count is its own query, run before any rows, so this is not the empty-result-means-too-large case above. | Check the case — matching is case-sensitive — and the exact spelling of the string. |
-| `searchBlocks` returns a count but `results: []` and `truncated: true` | More matches than it will fetch. Deliberate: a truncated row set would not say which matches were dropped. | Narrow the string or pass `page_uuid`. Raising `limit` will not help past the ceiling. |
+| `searchBlocks` returns `blocks: []` | No literal title match among the bounded native candidates, not an exhaustive graph zero. | Check spelling/case or use `findEntities` for structured/exact matching. |
+| `findEntities` returns `truncated: true` | Row or byte bounds stopped the result. | Pass `next_cursor` with unchanged parameters; row `count` is not a total. |
+| `findEntities` rejects a stale cursor or reports graph changes | Paging no longer refers to the same graph/search snapshot. | Restart without a cursor. Do not combine incompatible partial results. |
 | Every write fails with "The Imported EDN has N validation error(s)" while the dry run succeeds | `upsertNodes` fails on SYNCED graphs. Nothing in this server routes through it any more; if you see this, something is calling it directly. | Not a graph fault and not repairable from here. `createPage`, `insertBlock`, `updateBlock` and `createTag` all work on the same graph. |
 | A write works in the Logseq UI but fails through a tool | The method that tool routes through is failing, not the graph. | Try a tool that uses a different route before concluding anything about the data. |
 
@@ -57,11 +54,12 @@ query with inline quotes usually means the same. Neither is data.
 `own_blocks` is computed from `:block/page`, it cannot be evidence about
 `:block/page`.
 
-## The write circuit
+## Ambiguous writes
 
 A timed-out write is **ambiguous**: Logseq may have applied it before the
-connection dropped. Retrying could double it, so the server blocks every
-subsequent write while leaving reads open.
+connection dropped. Retrying could duplicate it. Native MCP does not advertise
+the legacy standalone server's `writes_disabled` circuit; do not assume
+later writes are automatically blocked.
 
 That asymmetry is the point — reads are how you find out what actually
 happened.
@@ -69,9 +67,9 @@ happened.
 To recover:
 
 1. Read the target and establish its real state.
-2. Restart **Logseq**, not just the MCP. A wedged DB worker survives a relay
-   restart, and the circuit exists because the worker was unresponsive.
-3. Reconnect the MCP.
+2. If even a trivial read remains unresponsive, ask the user to save work and
+   fully quit/restart Logseq, then reconnect MCP.
+3. Re-read state before any further mutation; restarting is not a rollback.
 
 Never work around this by reconnecting and repeating the write. Reconcile
 first.
@@ -83,11 +81,11 @@ wedge the worker while the MCP process stays healthy. Queries are
 single-attempt for that reason: a query that timed out once will time out
 again, and retrying doubles the load on something already struggling.
 
-`searchBlocks` and approved `datascriptQuery` predicates can inspect every
-title in the graph. Scope queries when possible; output caps do not cap worker
-execution, and every query retry or revision needs fresh explicit approval.
-For tools supporting page scoping, scope it with
-`page_uuid` when you can, and if the graph stops responding after a search,
+`findEntities` filters and approved `datascriptQuery` predicates can scan
+the graph. Scope when possible; output caps do not cap worker execution.
+Every `datascriptQuery` retry or revision needs fresh explicit approval.
+For `findEntities` block searches, use
+`page_uuid` when possible, and if the graph stops responding after a search,
 the worker is the first thing to suspect — restart Logseq, not just the MCP.
 Do not loop it over a list of words without checking the graph is still
 answering in between.
@@ -136,21 +134,6 @@ transform too. Use a code block.
 The MCP tools build their own queries, so this only arises with hand-written
 ones.
 
-## Operator scopes
-
-Optional, off by default. An empty value means no restriction, not deny-all.
-
-| Variable | Restricts |
-| --- | --- |
-| `LOGSEQ_WRITE_TITLE_PREFIXES` | titles of created pages, tags, properties — not block content |
-| `LOGSEQ_WRITE_PROPERTY_PREFIXES` | property idents, narrowing within the sandbox |
-| `LOGSEQ_WRITE_ENTITY_UUIDS` | which entities may be modified |
-| `LOGSEQ_PLUGIN_ID` | makes the sandbox check exact rather than namespace-wide |
-| `LOGSEQ_PROBE_WRITES` | set false to skip write probing in `capabilities` |
-
-A `PermissionError` from any of these is configuration working as intended.
-Name which scope blocked the write rather than retrying.
-
 ## Claims that need checking, not assuming
 
 `capabilities` reports `unknown` when a probe was inconclusive. That is not
@@ -161,11 +144,11 @@ Nothing here is guaranteed across Logseq versions. If
 verified against, and a behaviour difference is a plausible explanation for
 anything surprising.
 
-A previous version of this server carried a hardcoded list that reported three
-working methods as rejected, and block deletion was routed around them for
-months. If something is documented as unavailable and you have reason to doubt
-it, that doubt is worth acting on — `scripts/live_reliability.py` re-checks the
-load-bearing assumptions on demand.
+Read `basis` alongside tool `state`. Write probes default off; `not-probed`
+does not mean the method is broken. Do not enable `probe_writes` on a real
+graph merely to discover capabilities: obtain explicit approval and use a
+disposable graph. Native schemas and fresh read-back evidence are authoritative,
+not standalone-server scripts or environment-variable instructions.
 
 ## A count is not a symptom
 

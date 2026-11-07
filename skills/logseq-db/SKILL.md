@@ -1,6 +1,6 @@
 ---
 name: logseq-db
-description: "Use when reading or modifying a Logseq 2.x DB graph through the native MCP server built into Logseq Desktop. Covers DB queries, exact identifiers, verified writes, linked embeds, the property namespace sandbox, and recovery from ambiguous results. Never use file-graph or non-DB Logseq tools."
+description: "Use when reading or modifying a Logseq 2.x DB graph through native Logseq Desktop MCP. Covers structured findEntities search, DB queries, exact identifiers, verified writes, imports, recycled-title reuse, linked embeds, and recovery from ambiguous results. Never use file-graph or non-DB Logseq tools."
 ---
 
 # Logseq DB MCP
@@ -36,8 +36,12 @@ said so.
 What follows from that is a rule about the RESPONSE, not the tool: a raw
 Logseq response of `null` or `{:block 1}` is returned by writes that landed and
 by writes that did nothing, so it is never evidence. Read `verified`.
-`verified: false` means the write did not take effect even though no error was
-raised — report it as a failure, not a success with a caveat.
+`verified: false` means the requested result was not verified. Nothing, some,
+or all of the mutation may have landed; inspect state before retrying.
+Dry runs also return false because they perform no writes. A transport-successful
+MCP response can contain `status: "conflict"`; that is not a completed write.
+Thrown/API errors instead use MCP `isError: true`. Read the diagnostic and the
+tool-specific result, not a presumed universal envelope.
 
 ## Content capabilities
 
@@ -115,19 +119,24 @@ paths disagree deliberately:
 
 - `getPageUUID` is recycle-BLIND. A recycled page does not resolve, because a
   link resolving to a page the user deleted is worse than a miss.
-- `createPage` and `renamePage` are recycle-AWARE. The entity survives
-  recycling, so the title is still taken and both refuse it. They also count
-  blocks, tags and properties — all four share one title space.
+- `createPage` is recycle-AWARE. If every holder is a recycled page, it first
+  archives each holder as `<title> (<UUID>)`, preserving its identity, recycled
+  state and blocks, then creates the requested page. Live or non-page holders
+  return a structured conflict without creating a page.
+- `renamePage` does not apply this archive policy: it refuses recycled sources
+  and colliding titles. Blocks, tags and properties also participate in title
+  conflict checks.
 
 So `getPageUUID` reporting `found: false` does **not** mean you can write that
-title. Call `isTitleAvailable(title)` first, which runs the writers' own check
-and reports `available` plus `held_by` — each holder's UUID, `kind`, and
-`recycled`. Do not attempt to reconcile the two by treating either as wrong;
-the fix is to ask the right one.
+title without considering its holders. `isTitleAvailable(title)` reports
+`available`, `recycled`, and `held_by`; `available: true, recycled: true`
+means creation can attempt archive-and-reuse, not that all write-time safety
+checks passed. Preview with `createPage(title, dry_run=true)` and inspect
+`planned_archives`. After a real call inspect `archived_pages` as well as
+`created` and `verified`; archiving and creation are not atomic.
 
-This matters because recycling is not reversible: a page recycled in the
-belief that its title would be released still holds it, and there is no
-undo.
+Recycling alone keeps the title. Restore a recycled page through Logseq's
+Recycle UI when restoration, rather than creation of a new identity, is wanted.
 
 **Empty does not mean unused.** Before recycling any page, pair a block count
 with a reference count — `pageStats` gives both — and check `is_alias_of` and
@@ -143,11 +152,13 @@ starts a block, indentation gives depth, a bulletless line continues the
 block above. A LIST is one block per element with explicit depth, either a
 plain string or `{"text": "...", "depth": 1}`, and its text is used verbatim.
 
-Use the list form whenever a block contains newlines. The string form cannot
-carry them: a blank line inside a block is dropped, leading whitespace is
-stripped, and a line starting with `- ` becomes a child of the block instead
-of part of it. An eight-step numbered sequence, a markdown table or a fenced
-code block therefore needs the list form, or it fragments.
+Use the list form when blank lines or leading whitespace must survive.
+String continuation lines are trimmed and blank lines discarded. The list
+form preserves multiline text, but rejects blank blocks and embedded bullet
+lines beginning with `- ` (including indented ones), because Logseq would
+truncate them. Represent those bullets as child blocks with explicit depth;
+do not promise lossless nested-bullet text inside one block. Imports are
+capped at 500 blocks.
 
 **A tag is behaviour, not a label.** A built-in class declares properties on
 whatever carries it, and some change how the node renders: `#Code` turns a
@@ -254,28 +265,22 @@ The split is reported rather than silently subtracted, because an empty block
 someone typed is indistinguishable from a seeded one, and hiding the
 difference would trade a known overcount for an invisible undercount.
 
-The same reasoning applies to verifying a write: check the **delta** a call
-produced, not the absolute total. `importPage` takes a block count before and
-after and compares the gain against the markdown, which is immune to seed
-blocks and to whatever the page already held. An absolute comparison on an
-append cannot distinguish a successful import from a silent no-op.
+Import verification inventories created UUIDs and checks titles, native
+heading levels, parents, page ownership and sibling order, not just a count
+delta. Inspect `created_uuids`, `observed_blocks`, and
+`observed_empty_seed_blocks`. At most one late empty seed is tolerated, and
+only when the baseline inventory was empty.
 
-**To find a string, use `searchBlocks`.** Do not re-read pages looking for
-text. It returns uuid, kind, title, order and page per match — everything
-`updateBlock` needs to fix a typo in place. Three things to hold in mind:
+**Use `findEntities` for structured or exhaustive matching**, exact counts,
+page scoping, typed filters and bounded projected rows. See
+[search workflows](./reference/search-workflows.md).
 
-- **Case-sensitive, substring only.** `searchBlocks("Benifit")` will not find
-  `benifit`. Search the exact string you saw.
-- **`matches: 0` is a real zero**, counted separately from the rows, so it
-  does not mean "too many to return". Above 500 matches it reports the count
-  and fetches nothing; narrow the string or pass `page_uuid` rather than
-  raising `limit`.
-- **It is the one tool that runs a predicate in Logseq's DB worker**, which
-  can wedge it. Scope with `page_uuid` where you can, and do not loop it over
-  a word list without pausing to check the graph is still responding.
-
-`regex` refines what the substring already matched; it cannot widen the
-search, and there is no regex-only mode.
+`searchBlocks` is the simpler native-search wrapper. Its only MCP argument
+is `searchTerm`; it filters native candidates to case-sensitive literal
+title matches and returns them under `blocks` in the native envelope.
+It has no MCP `regex`, `page_uuid`, or `limit` argument, and no exhaustive
+count guarantee. An empty `blocks` list is not proof that the whole graph
+lacks the text: native candidate bounds are unchanged.
 
 ## Cost lives at the tool boundary
 
@@ -319,7 +324,7 @@ And when a tool does return something proportional to the damage — a plan, a
 list of orphans — read the summary rather than the list unless you intend to
 act on each item.
 
-**Every write tool takes `verbose`, and it defaults to true.** A write
+**Use `verbose` only on tools whose advertised schema includes it.** A write
 envelope carries the target entity TWICE — `previous_entities` and
 `verified_entities`, or `previous_state` and `verified_state` — so moving a
 block of prose costs that prose twice over to tell you a parent id.
@@ -362,13 +367,20 @@ calls is cheap; the same work as individual tool calls is not.
 Call `capabilities` once near the start. It reports **tools**, not API methods,
 each with a state and any constraints that apply:
 
-- `available` — probed and working
+- `available` — registered, inferred or probed; read `basis` and `detail`
 - `unavailable` — probed and confirmed absent
 - `unknown` — **the probe was inconclusive, not that the tool is missing.** Try
   it and check `verified` in the result.
 
-Read `constraints` on a tool before using it. Availability alone is not enough:
-`addProperty` is available and will still do nothing on a user-namespace ident.
+Read the advertised schema before using a tool. Availability alone is not
+enough: property writes outside the caller's namespace are refused.
+
+Read tool schema descriptions and reported `detail` as well; do not assume
+every tool has a `constraints` field. Write probes default off, so an
+`unknown`/`not-probed` write route is not evidence of failure. Only use
+`probe_writes=true` with explicit approval on a disposable graph. Check
+`graph.compatibility_target` and `graph.contract_revision`; registration and
+version agreement do not establish successful real mutations.
 
 If `graph.version_matches` is false, the connected Logseq is not the build
 these tools were verified against. Say so, and rely on read-back rather than
@@ -431,9 +443,10 @@ reversibility: the undo tool, or that there is none
 Ask for confirmation before `deleteProperty`, `deleteTag`, `removeBlock` on a
 block with children, or any change across multiple entities.
 
-After writing, check `verified`. On `verified=false`, read `previous_state` and
-`observed_state`: they distinguish "nothing happened" from "something else
-happened", and the usual cause is an identifier of the wrong type.
+After writing, check `verified`, `status`, and `diagnostic`. Read whichever
+before/after fields the tool supplies (`previous_state`, `observed_state`,
+`verified_state`, or entity arrays), then re-read exact UUIDs as needed.
+Do not equate failed verification with a no-op or blindly repeat a partial write.
 
 `dry_run` checks arguments and target existence. Most tools validate locally
 only — `createPage` in particular, since its route has no server-side dry run.
@@ -442,9 +455,11 @@ successful dry run as though the change were made.
 
 ### Pages
 
-`createPage(title)` rejects a title already held by any page, tag or block —
-the three share one title space. Its route is idempotent on title, so a repeat
-returns the existing page rather than duplicating it.
+`createPage(title)` returns `status: "conflict"`, `created: false`,
+`verified: false`, and `held_by` for live/non-page holders. Recycled-page-only
+holders are archived before title reuse. Preview `planned_archives` with a
+dry run; inspect `archived_pages` after real calls. Never treat the underlying
+API's idempotence as permission to retry an ambiguous creation.
 
 `renamePage(page_uuid, new_title)` verifies by UUID, not by the new title —
 reading back by title cannot distinguish a rename from Logseq having created a
@@ -490,7 +505,7 @@ than 68.
 > `detail=blocks` does NOT return the attribute, so use `getBlock` to see it;
 > and because `:logseq.property/` is outside the writable namespace, a heading
 > level cannot be set or changed with `addProperty`. The only way to create
-> one is to let the parser do it by writing `- ## Text`.
+> one is to use a content tool's heading conversion, not `addProperty`.
 >
 > So `importPage` escapes them: `[[X]]` → `{{link:X}}` and `#X` → `{{tag:X}}`.
 > The content is inert until repaired. **Tell the user this** — the links they
@@ -535,9 +550,9 @@ Page properties (`key:: value` above the first block) are parsed and reported
 but not applied: they are outside the writable namespace.
 
 **Batches are not atomic.** An outline several levels deep is several calls, so
-a failure partway leaves earlier levels committed. The result names the level
-that failed; treat it as a partial write and audit with `findOrphans` rather
-than retrying, which would duplicate what already landed.
+a failure partway leaves earlier levels committed. Inspect created UUIDs,
+the affected subtree and diagnostics before retrying; `findOrphans` alone
+cannot establish completeness or order.
 
 `moveBlock(block_uuid, target_uuid, placement)` relocates a block and its
 subtree — `child`, `last-child`, `before` or `after`. Confirmed working on all
@@ -615,11 +630,10 @@ page holds, and `createPage` refuses one a tag holds.
 `addTag(target, tag)` and `removeTag(target, tag)` take two UUIDs, **target
 first**. Removal affects that one relation only.
 
-`deleteTag` runs on an **unverified route**: it goes through `deletePage`,
-which has never been confirmed against a tag and whose identifier type is
-unknown there. The read-back is the only thing standing between that and a
-false success, so check `verified` and report `verified: false` as a failure
-rather than as a caveat.
+`deleteTag` uses the native deletion route and verifies tag absence plus
+dangling tag/reference cleanup. `deleteProperty` similarly checks definition,
+users and value cleanup. These are source-reviewed verification checks, not
+live deployment guarantees; inspect diagnostics and state on failure.
 
 When it does work it cascades: `:block/tags` and `:block/refs` are cleared on
 everything that carried the tag. Because that touches many entities and cannot
@@ -677,7 +691,8 @@ at the first block that does not verify, and reports which UUIDs landed.
 ## Tools
 
 **Reads** — `capabilities`, `getPageUUID`, `isTitleAvailable`, `inspectPage`,
-`pageStats`, `getBlockUUID`, `getBlock`, `searchBlocks`, `getBlockTree`,
+`getContentCapabilities`, `pageStats`, `getBlockUUID`, `getBlock`,
+`findEntities`, `searchBlocks`, `getBlockTree`, `listEmbeds`,
 `findBacklinks`, `findOrphans`, `getTagUUID`, `getTag`, `getTagUsers`,
 `getPropertyIndent`, `getProperyUsers`
 
@@ -691,7 +706,7 @@ Most take no arguments; `listPages` and `listJournals` take `with_counts` and
 **Writes** — `importPage`, `repairLinks`, `createPage`, `renamePage`,
 `retitleOverDuplicate`, `deletePage`, `clearPage`, `createBlock`,
 `createPageofBlocks`, `updateBlock`, `moveBlock`, `moveBlocks`,
-`removeBlock`, `creatTag`, `deleteTag`, `addTag`, `removeTag`,
+`removeBlock`, `createEmbed`, `creatTag`, `deleteTag`, `addTag`, `removeTag`,
 `createProperty`, `deleteProperty`, `addProperty`, `removeProperty`
 
 Creating tools require an acknowledgement when an entity would be minted:
@@ -715,6 +730,8 @@ stop and say so rather than adapting.
 
 Read before the matching work, not otherwise:
 
+- [Search workflows](./reference/search-workflows.md) — exact `findEntities`
+  filters, projections, counts and pagination; native `searchBlocks` limits.
 - `reference/data-modeling.md` — page vs block vs tag vs property, schema
   types, import order. Read before designing a schema or a multi-entity import.
 - `reference/built-ins.md` — the built-in classes (`#Task`, `#Code`,
@@ -724,7 +741,7 @@ Read before the matching work, not otherwise:
 - `reference/write-workflows.md` — exact shapes and verification steps for each
   write. Read before an unfamiliar write.
 - `reference/troubleshooting.md` — ambiguous results, timeouts,
-  `writes_disabled`, and what a silent no-op looks like. Read when a write
+  conflicts, and what a silent no-op looks like. Read when a write
   reports `verified=false`.
 - `reference/repair.md` — duplicate titles, split identities, stranded tags and
   properties, and the triage that comes before any of it. Read before

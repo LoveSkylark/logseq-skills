@@ -14,6 +14,12 @@ Install a skill using the skill mechanism supported by your agent client. Keep L
 
 These skills target the MCP server built into Logseq Desktop for DB graphs. Native Logseq source, SDK, tests and advertised tool schemas are authoritative. They assume native tools such as `createEmbed` and `listEmbeds` are available.
 
+The current guidance reflects structured `findEntities` search, literal native
+`searchBlocks` filtering, stricter import/read-back verification, and safe
+recycled-title archiving. These are source-reviewed contracts, not a claim that
+the connected desktop app has been rebuilt or live-tested. Check advertised
+schemas and `capabilities` on that app before relying on them.
+
 ## Build
 
 From PowerShell, run:

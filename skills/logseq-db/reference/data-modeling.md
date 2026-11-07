@@ -51,18 +51,14 @@ against it is `_test_plugin`. Properties the user made in the UI live under
 `user.property/*` and are readable but not writable, as are the
 `:logseq.property/*` built-ins.
 
-Whether any namespace is shared between callers is **untested**, and it
-matters: if there is none, two integrations cannot see each other's properties,
-and a property the user can edit in the UI can never be written by an API
-client. `scripts/live_reliability.py --explore` reports the caller id and the
-namespaces actually present in the graph.
+Read the actual ident returned by the native tool and the properties present
+in the connected graph. Do not assume a caller namespace from a historical
+test graph or depend on standalone-server inspection scripts.
 
-**Tags: creation works; the delete ROUTE has never succeeded.** Every write in
-this server reads back and reports `verified`, `deleteTag` included — the
-uncertainty is not in the checking but in whether `deletePage` (the route
-underneath it) does anything when handed a tag. Until a live run says
-otherwise, treat tag deletion as likely to come back `verified: false`, and do
-not design something that depends on cleaning up tags.
+**Tags: deletion has verification and impact guards.** The native handler
+checks tag absence and dangling tag/reference cleanup after deletion. Obtain
+approval for holder detachments and child reparenting; inspect `verified` and
+diagnostics rather than treating source-level support as proof of a live result.
 
 **Blocks can be moved.** `moveBlock(block_uuid, target_uuid, placement)`
 relocates a block and its subtree — `child`, `before` or `after` — including
