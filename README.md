@@ -7,6 +7,7 @@ Reusable agent skills and client instruction packs for the native Logseq MCP ser
 - [`skills/logseq-db/`](skills/logseq-db/README.md) covers native DB-graph reads, writes, identifiers, verification, embeds, and recovery.
 - [`skills/logseq-db-structure/`](skills/logseq-db-structure/SKILL.md) covers heading hierarchy, content placement, deduplication, and embeds.
 - [`skills/logseq-db-import-repair/SKILL.md`](skills/logseq-db-import-repair/SKILL.md) covers migration diagnosis, legacy tag-versus-backlink recommendations, and cautious repair.
+- [`extensions/claude-desktop/`](extensions/claude-desktop/README.md) contains the Claude Desktop extension source, installable package, and setup guide.
 
 Install a skill using the skill mechanism supported by your agent client. Keep Logseq behavior in the skills; put client-specific activation and instruction files under `instructions/<client>/`.
 
