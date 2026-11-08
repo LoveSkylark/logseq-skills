@@ -31,7 +31,7 @@ if (!loopbackHosts.has(parsedEndpoint.hostname) || parsedEndpoint.pathname !== "
 async function start() {
   const logseqClient = new Client({
     name: "Logseq Desktop transport",
-    version: "0.1.6"
+    version: "0.1.7"
   }, { capabilities: {} });
   const logseqTransport = new StreamableHTTPClientTransport(parsedEndpoint, {
     requestInit: {
@@ -63,7 +63,7 @@ async function start() {
 
   handle = serveStdio(() => {
     const server = new Server(
-      { name: "Logseq Local MCP", version: "0.1.6" },
+      { name: "Logseq Local MCP", version: "0.1.7" },
       { capabilities: { tools: {} } }
     );
     server.setRequestHandler("tools/list", request =>

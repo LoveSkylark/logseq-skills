@@ -22,6 +22,10 @@ The extension accepts loopback URLs only. It adapts Claude Desktop's local
 stdio transport to Logseq's loopback Streamable HTTP endpoint; Logseq remains
 responsible for tool handling and graph access.
 
+The same package supports Windows and macOS. It uses a platform-neutral Node.js
+bridge and does not include operating-system-specific binaries. Run Claude
+Desktop and Logseq on the same machine, with Logseq's native MCP server enabled.
+
 ## Build and source
 
 The Claude Desktop extension source is in the `source` subdirectory of this

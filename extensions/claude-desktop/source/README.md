@@ -38,6 +38,8 @@ To build the distributable package with the repository-level build script,
 run `.\build.ps1` from the parent `claude-desktop` directory.
 
 The extension accepts loopback URLs only. It does not expose Logseq or its API token to the public internet.
+The same package supports Windows and macOS; the bridge uses Node.js and has
+no operating-system-specific binaries.
 
 ## Tool contracts
 
