@@ -11,3 +11,7 @@ Logseq DB MCP connector. Other clients may use a different discovery path.
 
 The skill does not contain an API token. Keep credentials in the MCP client's
 local server configuration.
+
+The skill includes a guide-first workflow and an owner-approved guide template
+in [Graph guide pattern](./reference/graph-guide.md). It asks before creating
+guide or structural pages and keeps guide maintenance subject to permission.
