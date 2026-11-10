@@ -81,8 +81,8 @@ to bypass MCP through the native API.
   not an implicit redirect. Matching is not a universal availability check.
 - `kind` is still only `page` or `block`; alias matching and `aliases`
   selection do not add tag, property or journal kinds. Use their dedicated
-  tools when needed. No alias mutation or automatic link-suggestion tool
-  is introduced; alias relations remain outside MCP's writable properties.
+  tools when needed. Alias relations remain outside MCP's writable properties;
+  the separate `suggestLinks` tool below proposes links without inserting them.
 
 Find declaring pages by an exact alias, retaining enough evidence to review
 the target:
@@ -118,7 +118,45 @@ records share the 65536-byte response cap; an oversized single row errors,
 rather than silently returning a partial alias list. Select fewer fields if
 needed, and do not describe an omitted alias list as complete.
 
-### Text lookup
+## Draft link suggestions
+
+On builds advertising `suggestLinks`, use it to identify potential links in
+supplied draft text, not to search existing block content:
+
+```json
+{"text":"Project Alpha needs a review.","limit":20}
+```
+
+It reads live page titles and aliases through `findEntities`, matches literal
+case-sensitive whole names, and skips common existing links, tags, URLs,
+macros/embeds and inline/fenced code. Masking is conservative, not a full
+Markdown/Logseq renderer. Leftmost non-overlapping spans win, with the longest
+name preferred at the same start.
+
+Read `suggestions` entries as `{start,end,text,candidates,ambiguous}`.
+Offsets are UTF-16 code units with an exclusive end; JavaScript
+`draft.slice(start,end)` must equal the returned text. Candidates contain the
+target `uuid`, `title` and `matches: [{source,name_uuid}]`, where source is
+`title` or `alias`. Multiple targets remain ambiguous; an alias page's own
+title can itself be a candidate, not an implicit canonical redirect. Review
+targets rather than choosing the first.
+
+Drafts are limited to 20000 UTF-16 units. `limit` defaults to 20, maximum 100.
+`count` is the number returned; `total_spans` is the pre-truncation
+non-overlapping span count. Check `truncated`: response limits can omit later
+spans, never candidates within a returned span. There is no cursor; use a
+smaller draft if needed. Scan limits are 10000 live pages, 50000 name records
+and 8 MiB of inventory; raw matches cap at 10000 and output at 65536 UTF-8 bytes.
+Blank names and names longer than 1024 units are not suggested. Exceeded scan
+caps or changed graph names produce errors, not incomplete ambiguity reports.
+
+Returned names are reread before reporting, but suggestions are still not
+permission to write. Ask the owner about ambiguous destinations and obtain
+normal write authorization before applying anything. If the draft has changed,
+rerun rather than applying stale offsets. Any approved graph write must use
+the existing verified tools and preserve surrounding content and structure.
+
+## Text lookup
 
 ```json
 {
@@ -129,7 +167,7 @@ needed, and do not describe an omitted alias list as complete.
 }
 ```
 
-### Empty linked blocks on an exact page
+## Empty linked blocks on an exact page
 
 Replace the example UUID with the resolved owning page UUID:
 

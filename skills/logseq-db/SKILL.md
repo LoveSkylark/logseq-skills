@@ -308,8 +308,10 @@ those options. Select `aliases` for an inventory or `matched_names` for match
 evidence; they are not returned by default. Rows retain the declaring page's
 UUID/title, not the alias UUID. Preserve ambiguous candidates and inspect them
 before choosing a write target. Alias lookup does not enable alias writes.
-See
-[search workflows](./reference/search-workflows.md).
+On builds exposing `suggestLinks`, use it for read-only title/alias link
+candidates in supplied drafts. It returns UTF-16 spans and ambiguous targets,
+not edits; review destinations and obtain normal write authorization before
+applying suggestions. See [search workflows](./reference/search-workflows.md).
 
 `searchBlocks` is the simpler native-search wrapper. Its only MCP argument
 is `searchTerm`; it filters native candidates to case-sensitive literal

@@ -24,7 +24,9 @@ schemas and `capabilities` on that app before relying on them.
 Alias-aware page search uses `name_source` and opt-in `aliases`/`matched_names`
 fields on builds exposing them. It supports paginated alias discovery while
 preserving ambiguous targets; it does not add alias writes. Live Desktop alias
-verification remains outstanding.
+verification remains outstanding. The separate read-only `suggestLinks` tool
+proposes title/alias links in drafts with exact spans and explicit ambiguity;
+it does not insert links. Check the advertised tool schema before using it.
 
 The latest documentation review also clarifies unpaginated `listPages`,
 counted-journal limits, literal block updates versus heading-aware imports,
