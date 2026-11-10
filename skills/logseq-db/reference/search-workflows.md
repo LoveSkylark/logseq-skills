@@ -11,6 +11,7 @@ Do not call the underlying `logseq.DB.*` API directly.
 | --- | --- |
 | `kind` | Required: `page` or `block`. |
 | `state` | `live` (default), `recycled`, or `all`. |
+| `name_source` | `title` (default), `alias`, or `both`. Alias/both matching is page-only. |
 | `page_uuid` | Exact page UUID; only valid with `kind: "block"`. |
 | `where` | Optional structured filter, described below. |
 | `select` | Nonempty, unique field list. Default: `uuid`, `title`, `page_uuid`. |
@@ -19,8 +20,10 @@ Do not call the underlying `logseq.DB.*` API directly.
 | `cursor` | Returned cursor object, for row output only. Pass it unchanged. |
 
 Selectable fields: `uuid`, `title`, `page_uuid`, `page_title`, `parent_uuid`,
-`recycled`. Rows contain only selected keys; unavailable values can be null.
+`recycled`, `aliases` (pages only), `matched_names`.
+Rows contain only selected keys; unavailable values can be null.
 Select `uuid` whenever matches will need subsequent reads or approved writes.
+Alias and matched-name details are fetched only when selected.
 
 ## Filters
 
@@ -46,6 +49,74 @@ inspect embed metadata and the target before proposing removal.
 Combine filters with nonempty `{"all":[...]}` or `{"any":[...]}` groups.
 Maximum filter depth is 4, maximum nodes 32, and title literals are limited
 to 1024 characters.
+
+## Alias-aware page lookup
+
+Check the connected tool's advertised schema before using `name_source`,
+`aliases` or `matched_names`; an older Desktop build may not expose them.
+These are additions to `findEntities`, not a separate lookup tool or permission
+to bypass MCP through the native API.
+
+- `name_source: "title"` preserves existing title-only behavior.
+- `"alias"` tests the names the result page declares as aliases; `"both"`
+  tests its own title as well. Title operators remain literal and
+  case-sensitive. One candidate name must satisfy the whole filter; an `all`
+  filter cannot combine part of one alias with part of another. Structural
+  predicates still describe the result page.
+- Each row's `uuid` and `title` identify the declaring page, not the alias
+  entity. Counts and pagination deduplicate pages even when several aliases
+  match. If several pages claim a name, keep them as separate candidates and
+  ask the owner before choosing an ambiguous write target.
+- `matched_names` contains `{uuid,title,source,recycled}` records, where
+  `source` is `title` or `alias`. An alias record's UUID identifies the alias
+  entity; use the outer row's UUID for the declaring page. `aliases` contains
+  all declared `{uuid,title,recycled}` names allowed by the state policy,
+  regardless of which name matched.
+- `state` filters result pages, including inherited recycling. Live searches
+  also exclude recycled alias names; recycled/all searches allow either state
+  of alias names. Select `recycled` to distinguish result states and do not
+  restore anything automatically.
+- Only direct current and legacy alias relations are followed, not recursive
+  alias chains. A title-only match on an alias page returns that page itself,
+  not an implicit redirect. Matching is not a universal availability check.
+- `kind` is still only `page` or `block`; alias matching and `aliases`
+  selection do not add tag, property or journal kinds. Use their dedicated
+  tools when needed. No alias mutation or automatic link-suggestion tool
+  is introduced; alias relations remain outside MCP's writable properties.
+
+Find declaring pages by an exact alias, retaining enough evidence to review
+the target:
+
+```json
+{
+  "kind": "page",
+  "name_source": "alias",
+  "where": {"field": "title", "op": "equals", "value": "Alpha"},
+  "select": ["uuid", "title", "matched_names"]
+}
+```
+
+Use `"both"` for title-or-alias lookup. For several input names, combine title
+`equals` predicates with `any`, select `matched_names`, and associate returned
+names with those inputs; do not assume one row per input or a unique target.
+
+For a graph-wide alias inventory, omit `where`:
+
+```json
+{
+  "kind": "page",
+  "name_source": "alias",
+  "select": ["uuid", "title", "aliases"],
+  "limit": 50
+}
+```
+
+This lists only pages with qualifying aliases. Title mode with the same
+selection also includes pages with no aliases, returning `aliases: []`.
+Follow `next_cursor` before claiming the inventory is complete. Nested name
+records share the 65536-byte response cap; an oversized single row errors,
+rather than silently returning a partial alias list. Select fewer fields if
+needed, and do not describe an omitted alias list as complete.
 
 ### Text lookup
 

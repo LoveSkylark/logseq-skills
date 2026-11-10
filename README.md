@@ -15,11 +15,16 @@ Install a skill using the skill mechanism supported by your agent client. Keep L
 
 These skills target the MCP server built into Logseq Desktop for DB graphs. Native Logseq source, SDK, tests and advertised tool schemas are authoritative. They assume native tools such as `createEmbed` and `listEmbeds` are available.
 
-The current guidance reflects structured `findEntities` search, literal native
+The current guidance reflects structured, alias-aware `findEntities` search, literal native
 `searchBlocks` filtering, stricter import/read-back verification, and safe
 recycled-title archiving. These are source-reviewed contracts, not a claim that
 the connected desktop app has been rebuilt or live-tested. Check advertised
 schemas and `capabilities` on that app before relying on them.
+
+Alias-aware page search uses `name_source` and opt-in `aliases`/`matched_names`
+fields on builds exposing them. It supports paginated alias discovery while
+preserving ambiguous targets; it does not add alias writes. Live Desktop alias
+verification remains outstanding.
 
 The latest documentation review also clarifies unpaginated `listPages`,
 counted-journal limits, literal block updates versus heading-aware imports,

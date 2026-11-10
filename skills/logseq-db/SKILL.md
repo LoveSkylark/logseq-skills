@@ -1,6 +1,6 @@
 ---
 name: logseq-db
-description: "Use when reading, organising, cleaning or modifying a Logseq 2.x DB graph through native Logseq Desktop MCP. Read the graph guide first and keep owner-approved conventions current. Covers structured findEntities search, DB queries, exact identifiers, verified writes, imports, recycled-title reuse, linked embeds, and recovery from ambiguous results. Never use file-graph or non-DB Logseq tools."
+description: "Use when reading, organising, cleaning or modifying a Logseq 2.x DB graph through native Logseq Desktop MCP. Read the graph guide first and keep owner-approved conventions current. Covers alias-aware findEntities search, DB queries, exact identifiers, verified writes, imports, recycled-title reuse, linked embeds, and recovery from ambiguous results. Never use file-graph or non-DB Logseq tools."
 ---
 
 # Logseq DB MCP
@@ -302,7 +302,13 @@ delta. Inspect `created_uuids`, `observed_blocks`, and
 only when the baseline inventory was empty.
 
 **Use `findEntities` for structured or exhaustive matching**, exact counts,
-page scoping, typed filters and bounded projected rows. See
+page scoping, typed filters and bounded projected rows. Page searches support
+`name_source: "title"` (default), `"alias"`, or `"both"` on builds advertising
+those options. Select `aliases` for an inventory or `matched_names` for match
+evidence; they are not returned by default. Rows retain the declaring page's
+UUID/title, not the alias UUID. Preserve ambiguous candidates and inspect them
+before choosing a write target. Alias lookup does not enable alias writes.
+See
 [search workflows](./reference/search-workflows.md).
 
 `searchBlocks` is the simpler native-search wrapper. Its only MCP argument
