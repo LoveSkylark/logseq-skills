@@ -20,24 +20,33 @@ Claude Desktop extension directory. To choose another destination, pass
 
 ## Install
 
-1. In Claude Desktop, open **Settings > Desktop app** and select **Manage**
-   next to **Extensions**. In older Settings layouts, open **Settings >
-   Extensions** instead.
-2. Choose **Advanced settings**, then find the **Extension Developer** section.
-3. Click **Install Extension...** and select the generated `.mcpb` package.
-4. Follow the prompts. Configure the URL as `http://127.0.0.1:12315/mcp`
-   and enter a fresh Logseq API token in the sensitive token field.
-5. Keep the Logseq app open, with its HTTP API server and MCP enabled.
-6. If the extension installs but its tools do not appear, restart Claude
-   Desktop and check the extension's configuration and connection status.
+Before installing, open the target DB graph in Logseq Desktop. In Logseq's API
+server controls, keep the host on loopback (`127.0.0.1`), configure an access
+token, save its token value securely, start the API server, and enable native
+MCP. Keep Logseq running; the extension connects to the graph currently served
+by that app and does not switch graphs.
+
+In Claude Desktop, open **Settings > Desktop app** and select **Manage** next
+to **Extensions**. In older Settings layouts, open **Settings > Extensions**.
+Choose **Advanced settings**, then find the **Extension Developer** section.
+Click **Install Extension...**, select the generated `.mcpb` package, and
+follow the prompts. Set the URL to `http://127.0.0.1:12315/mcp` (or your
+configured loopback port) and enter the token value in the sensitive API-token
+field. Connect to the extension in a Claude conversation.
+
+If the extension installs but its tools do not appear, restart Claude Desktop
+and check the extension's configuration and connection status.
 
 Claude's settings layout can vary by version. For the latest menu path, see
 [Anthropic's installation guide](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop).
+Organization-managed Claude accounts may restrict custom extension installs.
 
 To build the distributable package with the repository-level build script,
 run `.\build.ps1` from the parent `claude-desktop` directory.
 
-The extension accepts loopback URLs only. It does not expose Logseq or its API token to the public internet.
+The extension accepts loopback URLs only. It does not expose Logseq or its API
+token to the public internet. The token is a local Desktop API token, not a
+Logseq cloud token; do not commit or share it.
 The same package supports Windows and macOS; the bridge uses Node.js and has
 no operating-system-specific binaries.
 

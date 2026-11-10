@@ -2,21 +2,43 @@
 
 ## Install
 
-Install [`logseq-native.mcpb`](./logseq-native.mcpb) in Claude Desktop:
+The `.mcpb` is a Claude Desktop extension, not a Logseq skill ZIP. The ready-to-install package in this repository is
+[`logseq-native.mcpb`](./logseq-native.mcpb). Use this package on the same
+Windows or macOS computer that runs Logseq Desktop and Claude Desktop.
 
-1. Open **Settings > Desktop app** and select **Manage** next to
+### Prepare Logseq
+
+1. Open Logseq Desktop and the DB graph you want Claude to access.
+2. Open Logseq's API server controls. Keep the host bound to loopback
+   (`127.0.0.1`) and use port `12315`, unless you have deliberately configured
+   a different local port.
+3. Configure an access token, save its **token value** securely, and start the
+   API server. Enable the native MCP endpoint as well.
+4. Keep Logseq running. The extension connects to the currently served graph;
+   it does not select or switch graphs.
+
+Do not share or commit the token. It is a local Desktop API token, not a
+Logseq cloud token. The extension only accepts loopback `/mcp` URLs.
+
+### Install in Claude Desktop
+
+1. In Claude Desktop, open **Settings > Desktop app** and select **Manage**
+   next to
    **Extensions**. In older Settings layouts, open **Settings > Extensions**.
 2. Choose **Advanced settings**, then find the **Extension Developer** section.
-3. Click **Install Extension...**, select the package, and follow the prompts.
-4. Configure the endpoint as `http://127.0.0.1:12315/mcp`.
-5. Enter a fresh Logseq API token in the sensitive token field.
-6. Keep Logseq open with its HTTP API server and native MCP enabled.
+3. Click **Install Extension...**, select
+   [`logseq-native.mcpb`](./logseq-native.mcpb), and follow the prompts.
+4. Set the MCP URL to `http://127.0.0.1:12315/mcp` (or use your configured
+   loopback port) and enter the token value in the sensitive API-token field.
+5. Connect to the extension in a Claude conversation. If its tools do not
+   appear, restart Claude Desktop and check the extension's configuration and
+   connection status.
 
 The settings layout can vary by Claude Desktop version. Check
 [Anthropic's current installation guide](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
-if these menu labels differ. If installation succeeds but tools are missing,
-restart Claude Desktop and review the extension configuration and connection
-status.
+if these menu labels differ. Organization-managed Claude accounts may restrict
+installation of custom extensions; contact the administrator if the install
+option is unavailable.
 
 The extension accepts loopback URLs only. It adapts Claude Desktop's local
 stdio transport to Logseq's loopback Streamable HTTP endpoint; Logseq remains
@@ -35,10 +57,11 @@ folder. From this directory, run:
 .\build.ps1
 ```
 
-This builds the `.mcpb` package into this directory. The extension source and
-its build process are maintained here, separately from the Logseq application
-build. Rebuild and reinstall after changing the bridge, then reconnect Claude
-Desktop.
+This builds the `.mcpb` package into this directory. Building from source
+requires Node.js/npm and an internet connection to install dependencies. The
+extension source and its build process are maintained here, separately from
+the Logseq application build. Rebuild and reinstall after changing the bridge,
+then reconnect Claude Desktop.
 
 ## Tool behavior
 
