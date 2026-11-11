@@ -28,6 +28,15 @@ verification remains outstanding. The separate read-only `suggestLinks` tool
 proposes title/alias links in drafts with exact spans and explicit ambiguity;
 it does not insert links. Check the advertised tool schema before using it.
 
+The read-only `getGraphHealth` tool, when advertised, reports counts and bounded
+examples of exact duplicate page/tag titles, tags without direct holders and
+properties without stored values, live alias ambiguity and literal import
+placeholders by default. Optional check selection adds bounded page,
+recycled-reference and choice-membership audits, with explicit coverage limits
+and unchecked-property reporting. It gives no health verdict or cleanup
+authorization; built-ins, recycled entities and other references can explain
+findings. Local fixtures are verified; live Desktop validation remains pending.
+
 The latest documentation review also clarifies unpaginated `listPages`,
 counted-journal limits, literal block updates versus heading-aware imports,
 MCP reference-value shapes, and the known case-variant page-creation defect.

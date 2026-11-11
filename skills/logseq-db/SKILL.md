@@ -313,6 +313,22 @@ candidates in supplied drafts. It returns UTF-16 spans and ambiguous targets,
 not edits; review destinations and obtain normal write authorization before
 applying suggestions. See [search workflows](./reference/search-workflows.md).
 
+On builds exposing `getGraphHealth`, use it for compact objective counts and
+examples: exact duplicate page/tag titles (including recycled), tags without
+direct holders, properties without stored values, live alias ambiguity and
+literal import placeholders. Optional `checks` replaces the defaults; opt-in
+audits cover empty/unreferenced pages, parent/page mismatches, recycled-target
+references and reference-valued choice membership. Use `page_uuids` to scope
+only the two page audits. Inspect unchecked choice properties and coverage
+limits; no result proves general schema validity. It is not a health verdict
+or cleanup authorization. Alias carriers are not competing alias declarations;
+ownership respects nested/recycled page boundaries; recycled-reference counts
+exclude original-page/original-parent bookkeeping, not real self/view links.
+Respect nested sample truncation and inventory-cap
+errors; other references, child tags, built-ins and aliases can explain results.
+Reads are not an atomic snapshot. See the
+[health workflow](./reference/search-workflows.md#graph-health-observations).
+
 `searchBlocks` is the simpler native-search wrapper. Its only MCP argument
 is `searchTerm`; it filters native candidates to case-sensitive literal
 title matches and returns them under `blocks` in the native envelope.

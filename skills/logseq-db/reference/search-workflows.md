@@ -238,3 +238,123 @@ literal title matches, returning `blocks` in the native envelope. Native
 candidate limits remain unchanged; it is not an exhaustive graph scan.
 There are no MCP `regex`, `page_uuid`, or `limit` arguments and no exact-total
 promise. Use `findEntities` when scope, completeness or counts matter.
+
+## Graph health observations
+
+Use `getGraphHealth` only when advertised by the connected server:
+
+```json
+{"sample_limit":5}
+```
+
+`sample_limit` defaults to 5 and must be an integer from 1 to 20. Optional
+`checks` is a nonempty unique list that **replaces** the defaults. Optional
+`page_uuids` scopes only the two page audits below; it requires those checks
+and 1-100 unique live Page-class UUIDs. Other selected checks stay graph-wide.
+There are no repair, raw-query, convention or pagination arguments.
+
+The tool returns only selected `checks`, `checks_run`, `title_entities_scanned`
+(null when unused), actual audited `page_uuids` (null without page audits),
+`consistency`, `limits`, and `diagnostic`. Each check has `count`, bounded
+`examples`, and `truncated`. Default checks:
+
+- `duplicate_titles`: exact, case-sensitive, nonblank Page/Tag-class title
+  groups, including recycled entities. `count` counts groups; `entity_count`
+  counts all group members. Each example includes `title`, `entity_count`,
+  sampled `entities` (`uuid`, `kind`, `recycled`), and a member `truncated`
+  flag. The recycled flag reflects directly stored deletion, not inherited
+  state. There is no alias/content/reference classification or merge ranking.
+- `tags_without_holders`: native tags with no direct `:block/tags` holders.
+  Examples retain available UUID/title/ident. Other references and child tags
+  can exist; this is not a deletion-safety check.
+- `properties_without_values`: qualified namespaced property attributes with
+  no stored values. Examples include `ident`, `title`, and `type`; declarations
+  alone do not count as attribute values.
+- `alias_ambiguity`: exact, case-sensitive nonblank live page titles/direct
+  aliases shared by multiple declaring pages, with at least one alias match.
+  Pure title duplicates remain in `duplicate_titles`. `count` counts ambiguous
+  names, `names_examined` distinct names. Examples retain name, candidate count,
+  sampled declaring-page UUID/title and sampled title/alias evidence with
+  source/name UUID. Check candidate and evidence truncation; no target is chosen.
+  The alias carrier's own title is not a separate competing declaration.
+  Multiple declaring pages and unrelated same-title pages still count.
+  This health-only filtering does not change `findEntities` or `suggestLinks`.
+- `unresolved_placeholders`: remaining complete literal `{{link:NAME}}` and
+  `{{tag:NAME}}` markers in live ordinary blocks. `count` counts block/kind/name
+  combinations, `block_count` affected blocks, `occurrence_count` all markers.
+  Examples include block/page UUIDs, kind/name, occurrences,
+  `resolution` (`missing`, `resolvable`, `ambiguous`), candidate count and
+  sampled candidates. Resolution is exact Page/Tag-class title matching, not
+  alias matching, using directly stored recycling from title inventory.
+  Resolvable markers still count as unconverted placeholders. Code/examples
+  are not masked; malformed/unclosed markers are not counted. This is not a
+  general broken-link detector or write-time target verification.
+
+Opt-in audits:
+
+```json
+{
+  "checks":["empty_pages","page_ownership_mismatches"],
+  "page_uuids":["00000000-0000-4000-8000-000000000001"]
+}
+```
+
+- `empty_pages`: live pages with zero native content blocks, inbound
+  refs/tag holders/property-value counts, and no alias relationship in either
+  direction. Own/seeded empty blocks do not establish content. This is a
+  candidate report, not deletion permission.
+- `page_ownership_mismatches`: structural descendants whose stored page UUID
+  differs from the nearest structural page ancestor. Nested pages, including
+  recycled pages under Recycle, establish their own ownership boundary. `count` counts
+  page/block pairs; `distinct_block_count` deduplicates blocks across audits.
+  Examples contain audited, block, stored-page and `expected_page_uuid` UUIDs.
+  Missing stored-page UUIDs are excluded; incomplete/cyclic ancestry errors.
+  Blocks can still render correctly. Do not move blocks merely to reduce a count.
+  The separate `findOrphans` tool is unchanged.
+- `references_to_recycled`: directly recycled pages/blocks with inbound
+  backlink/tag-holder/property-value rows. `count` counts targets,
+  `targets_scanned` all direct recycled entities, and `reference_count`
+  relation rows, not unique referrers. Examples contain target UUID/title
+  and sampled reference/holder/property summaries. Referrers may also be
+  recycled. Recycle original-page/original-parent property bookkeeping is
+  excluded; genuine self-links and built-in view references still count.
+  Inherited-only recycling is not inventoried; this is not proof of broken links.
+- `invalid_choice_values`: holder/value rows on reference-valued properties
+  that are not IDs of that property's directly non-recycled declared choices.
+  Examples contain property ident, holder, raw value and resolved entity
+  summary. Compares identity, not labels. Review `properties_scanned`,
+  `unchecked_property_count`, sampled `unchecked_properties`,
+  `unchecked_properties_truncated`, and `validation_complete` (false if any
+  property storage was unsupported). Non-reference storage is not guessed.
+  Properties without choice definitions, class-scoped choices/exclusions,
+  inherited choice recycling and general type/schema rules are not validated.
+  The server alone requests opt-in native choice metadata; ordinary
+  `listClosedValues()` retains its original response.
+
+Built-in and recycled definitions are not excluded from the orphan checks.
+Counts remain complete per inventory/scope when examples are truncated;
+choice-validation coverage is explicitly limited as above. Nested members,
+candidates, alias evidence, reference rows and unchecked-property examples
+also have sampling/truncation indicators.
+There is no sample cursor; use detailed tools to investigate omitted rows.
+`consistency: "independent_reads"` means no atomic graph snapshot is promised.
+
+Inventories must fit 10000 rows, including accumulated entity-search pages;
+name records are capped at 50000, distinct placeholder rows at 10000.
+Per native response: 8 MiB; total: 32 MiB/400 calls. Fan-out is capped at 100
+audited pages (scope with `page_uuids`), 100 directly recycled targets, and 50
+choice properties. Otherwise use targeted detailed tools rather than treating
+an error as a partial pass. These are MCP caps, not native execution/scan/
+transfer limits; native search cursor/byte errors propagate. Cap violations, malformed
+inventories and API failures error the entire report, never return partial
+counts or zero-shaped fallbacks. The response cap is 65536 UTF-8 bytes; lower
+the sample size or use detailed tools if exceeded.
+
+Do not call these observations damage or use them as cleanup authorization.
+Zero counts do not certify graph health. Missing summaries/tags, local asset
+availability, lost embed targets and general schema validation are not checked.
+Use `findDuplicateTitles`
+for content/reference/alias evidence, `listOrphanTags`/`listOrphanProperties`
+for full inventories, and `findBacklinks`, `getTagUsers`, or `getProperyUsers`
+for usage before proposing owner-approved changes. Do not bypass MCP with the
+underlying native APIs. Live Desktop verification remains pending.
