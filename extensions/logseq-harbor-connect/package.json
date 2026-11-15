@@ -1,0 +1,11 @@
+{
+  "name": "logseq-harbor-connect",
+  "version": "0.1.8",
+  "private": true,
+  "type": "commonjs",
+  "description": "Local Claude Desktop transport adapter for several Logseq MCP graphs at once.",
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0"
+  }
+}

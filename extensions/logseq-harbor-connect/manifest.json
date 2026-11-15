@@ -1,0 +1,46 @@
+{
+  "manifest_version": "0.3",
+  "name": "logseq-harbor-connect",
+  "display_name": "Logseq Harbor Connect",
+  "version": "0.1.8",
+  "description": "Connect Claude Desktop to every Logseq MCP graph behind the Harbor proxy. Graphs are discovered from /mcp; tool names are prefixed with the graph name.",
+  "author": {
+    "name": "Logseq local development"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "LOGSEQ_MCP_PROXY_URL": "${user_config.logseq_proxy_url}",
+        "LOGSEQ_MCP_TOKEN": "${user_config.logseq_api_token}"
+      }
+    }
+  },
+  "user_config": {
+    "logseq_proxy_url": {
+      "type": "string",
+      "title": "Logseq proxy URL",
+      "description": "The root address of the Harbor reverse proxy. Graphs are read from its /mcp list. Example: http://127.0.0.1:8080",
+      "default": "http://127.0.0.1:8080",
+      "required": true
+    },
+    "logseq_api_token": {
+      "type": "string",
+      "title": "Logseq MCP token",
+      "description": "The logseq_mcp_token value from the Harbor config.yaml. Claude Desktop stores this as a sensitive value.",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["win32", "darwin"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}
